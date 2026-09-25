@@ -32,6 +32,16 @@ test("analyzeBash does not treat a redirection fd as a command", () => {
   }
 });
 
+test("analyzeBash does not read a sed script as a path", () => {
+  // The sed expression is a script, not a file. Its `/.../` delimiters make it
+  // look path-like, but only the trailing file argument touches the filesystem.
+  const command =
+    "sed -n '/^export type ThemeColor =/,/^   |/p' src/modes/interactive/theme/theme.ts";
+  const sed = analyzeBash(command, "/work").find((segment) => segment.patterns.includes("sed"));
+  assert.ok(sed, "expected a sed segment");
+  assert.deepEqual(sed.paths, ["/work/src/modes/interactive/theme/theme.ts"]);
+});
+
 test("nested external folders in one command collapse to the outermost", () => {
   const command =
     "ls -la /Users/minh/temp/test/ && ls -la /Users/minh/temp/test/folder_2/folder_9/ 2>&1; ls -la /Users/minh/temp/test/folder_1";

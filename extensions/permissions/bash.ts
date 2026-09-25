@@ -74,6 +74,16 @@ const PATH_COMMANDS = new Set([
   "install",
 ]);
 
+/**
+ * Commands whose first positional argument is a program/expression, not a
+ * path. The `/.../ ` delimiters in a sed or grep expression otherwise read as
+ * a filesystem path.
+ */
+const SCRIPT_COMMANDS = new Set(["sed", "awk", "gawk", "mawk", "nawk", "grep", "egrep", "fgrep", "rg", "ag", "ack"]);
+
+/** Flags that supply the program inline, moving it off the positional args. */
+const INLINE_PROGRAM_FLAGS = ["--expression=", "--regexp=", "--file="];
+
 /** Commands whose durable prefix is two words, so `git push *` beats `git *`. */
 const TWO_WORD_COMMANDS = new Set([
   "git",
@@ -298,7 +308,11 @@ function redirectionTargets(segment: string): string[] {
 function collectPaths(segment: string, family: string, rest: string[], cwd: string): string[] {
   const paths = new Set<string>();
   const args = rest.filter((token) => !isFlag(token) && !OPERATORS.has(token));
-  const candidates = PATH_COMMANDS.has(family) ? args : args.filter(looksLikePath);
+  // A script command's first positional is its program. Skip it unless a flag
+  // already supplied the program, in which case the positionals are all paths.
+  const programAttached = rest.some((token) => INLINE_PROGRAM_FLAGS.some((flag) => token.startsWith(flag)));
+  const operands = SCRIPT_COMMANDS.has(family) && !programAttached ? args.slice(1) : args;
+  const candidates = PATH_COMMANDS.has(family) ? args : operands.filter(looksLikePath);
 
   for (const candidate of candidates) paths.add(resolveUserPath(candidate, cwd));
   for (const target of redirectionTargets(segment)) paths.add(resolveUserPath(target, cwd));
