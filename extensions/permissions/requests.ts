@@ -12,9 +12,15 @@ import { collapseFolders } from "./wildcard.ts";
 
 /** Drop external folders that sit inside another folder in the list. */
 export function mergeExternal(requests: readonly PermissionRequest[]): PermissionRequest[] {
-  const folders = requests.flatMap((request) => (request.always[0] ? [request.always[0]] : []));
-  const kept = new Set(collapseFolders(folders));
-  return requests.filter((request) => request.always[0] !== undefined && kept.has(request.always[0]));
+  const byFolder = new Map<string, PermissionRequest>();
+  for (const request of requests) {
+    const folder = request.always[0];
+    if (folder !== undefined && !byFolder.has(folder)) byFolder.set(folder, request);
+  }
+  const kept = new Set(collapseFolders([...byFolder.keys()]));
+  return [...byFolder.entries()]
+    .filter(([folder]) => kept.has(folder))
+    .map(([, request]) => request);
 }
 
 /** Group asking requests by permission so one prompt covers them all. */

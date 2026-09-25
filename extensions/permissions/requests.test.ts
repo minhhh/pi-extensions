@@ -56,6 +56,31 @@ test("mergeExternal drops folders contained by another", () => {
   );
 });
 
+test("mergeExternal drops exact duplicate folders", () => {
+  const first = request({ permission: "external_directory", always: ["/tmp/test"], patterns: ["/tmp/test"] });
+  const second = request({ permission: "external_directory", always: ["/tmp/test"], patterns: ["/tmp/test"] });
+
+  const merged = mergeExternal([first, second]);
+
+  assert.deepEqual(
+    merged.map((entry) => entry.always[0]),
+    ["/tmp/test"],
+  );
+});
+
+test("mergeExternal drops duplicates nested under a kept folder", () => {
+  const parent = request({ permission: "external_directory", always: ["/tmp/test"], patterns: ["/tmp/test"] });
+  const child = request({ permission: "external_directory", always: ["/tmp/test/folder_1"], patterns: ["/tmp/test/folder_1"] });
+  const childAgain = request({ permission: "external_directory", always: ["/tmp/test/folder_1"], patterns: ["/tmp/test/folder_1"] });
+
+  const merged = mergeExternal([parent, child, childAgain]);
+
+  assert.deepEqual(
+    merged.map((entry) => entry.always[0]),
+    ["/tmp/test"],
+  );
+});
+
 test("mergeExternal keeps unrelated folders", () => {
   const left = request({ permission: "external_directory", always: ["/a"], patterns: ["/a"] });
   const right = request({ permission: "external_directory", always: ["/b"], patterns: ["/b"] });
