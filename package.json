@@ -1,7 +1,7 @@
 {
   "name": "pi-extensions",
   "version": "0.1.0",
-  "description": "Personal pi extensions: permissions, roles, and workflow tooling for the pi coding agent.",
+  "description": "Personal pi extensions: permissions, token-rate reporting, and workflow tooling for the pi coding agent.",
   "keywords": [
     "pi-package",
     "pi-extensions",
@@ -11,7 +11,8 @@
   "license": "MIT",
   "pi": {
     "extensions": [
-      "./extensions/permissions/permission-gate.ts"
+      "./extensions/permissions/permission-gate.ts",
+      "./extensions/tps.ts"
     ]
   },
   "scripts": {
@@ -19,6 +20,7 @@
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"extensions/**/*.test.ts\""
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.87.1",
     "@earendil-works/pi-coding-agent": "^0.87.1",
     "@types/node": "^22.10.0",
     "typescript": "^5.7.0"

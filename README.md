@@ -1,7 +1,7 @@
 # pi-extensions
 
 Personal [pi](https://github.com/earendil-works/pi) extensions: permissions,
-roles, and workflow tooling for the pi coding agent.
+token-rate reporting, and workflow tooling for the pi coding agent.
 
 Early and opinionated. These are extensions I actually run, not a supported
 distribution. Expect the config format to move.
@@ -15,6 +15,7 @@ extensions/
     permission-gate.ts    event wiring, the ask flow, /permissions
     config.ts             config loading and built-in defaults
     bash.ts               shell command analysis
+  tps.ts                  tokens-per-second report after each turn
 ```
 
 Pi discovers a subdirectory only when it contains `index.ts`, `index.js`, or a
@@ -23,11 +24,13 @@ point can be named `permission-gate.ts` instead of `index.ts`.
 
 ## Install
 
-Symlink the directory into the agent extensions folder:
+Symlink the extensions into the agent extensions folder:
 
 ```bash
 ln -sfn /path/to/pi-extensions/extensions/permissions \
   ~/.pi/agent/extensions/permissions
+ln -sfn /path/to/pi-extensions/extensions/tps.ts \
+  ~/.pi/agent/extensions/tps.ts
 ```
 
 Or install the package from git:
@@ -248,6 +251,21 @@ Extension-layer enforcement binds only processes that load the extension.
 until trust is granted, so an agent that can run shell commands can launch an
 ungoverned `pi` unless you also gate that. Use a sandbox, container, or a
 dedicated user account when you need a real boundary.
+
+## tps
+
+`tps.ts` reports how fast the model generated tokens. It listens for
+`agent_start` and `agent_end`, sums the usage on every assistant message in the
+turn, and notifies with the result:
+
+```text
+TPS 42.7 tok/s. out 1,024, in 12,345, cache r/w 8,000/200, total 13,769, 24.0s
+```
+
+The rate is output tokens over the wall-clock time between the two events. It
+counts input, output, cache read, cache write, and total tokens as well. The
+report is skipped in a non-interactive run and when the turn produced no output
+tokens. The extension has no config.
 
 ## Development
 
