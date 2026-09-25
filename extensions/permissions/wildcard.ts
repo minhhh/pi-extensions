@@ -9,9 +9,14 @@
  *   - everything else is literal
  *   - a pattern ending in " *" makes the trailing space and rest optional, so
  *     `ls *` matches both `ls` and `ls -la`
+ *   - a pattern ending in a path wildcard also matches the directory itself,
+ *     so `~/.pi/*` and `~/.pi/**` both match `~/.pi`
  *
  * Note that `*` crosses path separators. `packages/web/*.mdx` matches nested
  * files too. That is intentional: OpenCode patterns are not shell globs.
+ * Because `*` already crosses `/`, `folder/*` and `folder/**` are equivalent,
+ * and a folder rule must cover the folder itself. Allowing only the children
+ * of a folder is not a useful policy: a deny on a child is written explicitly.
  */
 
 import * as os from "node:os";
@@ -26,11 +31,15 @@ function compile(pattern: string): RegExp {
   let escaped = pattern
     .replace(/\\/g, "/")
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*")
+    .replace(/\*+/g, ".*")
     .replace(/\?/g, ".");
 
   if (escaped.endsWith(" .*")) {
     escaped = `${escaped.slice(0, -3)}( .*)?`;
+  } else if (/[^ ]\/\.\*$/.test(escaped)) {
+    // `folder/*` and `folder/**` also match `folder`. The guard skips a slash
+    // that follows a space, which is a command pattern such as `ls /*`.
+    escaped = escaped.replace(/\/\.\*$/, "(/.*)?");
   }
 
   const re = new RegExp(`^${escaped}$`, process.platform === "win32" ? "si" : "s");

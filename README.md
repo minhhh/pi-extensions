@@ -134,6 +134,11 @@ Patterns use simple wildcard matching:
 A pattern ending in `*` after a space makes the trailing part optional, so
 `ls *` matches both `ls` and `ls -la`.
 
+A pattern ending in a path wildcard also matches the directory itself, so
+`~/.pi/*` and `~/.pi/**` both match `~/.pi`. Because `*` already crosses `/`,
+they are equivalent. Allow the children of a folder while denying its root by
+writing the child rule explicitly.
+
 A leading `~` or `$HOME` expands to your home directory. That is most useful
 for `external_directory`, where paths are absolute.
 

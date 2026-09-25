@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collapseFolders } from "./wildcard.ts";
+import { collapseFolders, expandHome, wildcardMatch } from "./wildcard.ts";
 
 test("collapseFolders keeps only the outermost folder", () => {
   const folders = [
@@ -21,4 +21,24 @@ test("collapseFolders does not treat a name prefix as containment", () => {
 
 test("collapseFolders dedupes equal folders", () => {
   assert.deepEqual(collapseFolders(["/a/b", "/a/b"]), ["/a/b"]);
+});
+
+test("a trailing path wildcard also matches the folder itself", () => {
+  assert.equal(wildcardMatch("/home/u/.pi", "/home/u/.pi/*"), true);
+  assert.equal(wildcardMatch("/home/u/.pi", "/home/u/.pi/**"), true);
+  assert.equal(wildcardMatch("/home/u/.pi", expandHome("~/.pi/**", "/home/u")), true);
+});
+
+test("a trailing path wildcard still matches everything under the folder", () => {
+  assert.equal(wildcardMatch("/home/u/.pi/agent/permissions.json", "/home/u/.pi/*"), true);
+  assert.equal(wildcardMatch("/home/u/.pi/agent/permissions.json", "/home/u/.pi/**"), true);
+});
+
+test("a folder pattern does not match a sibling with the same prefix", () => {
+  assert.equal(wildcardMatch("/home/u/.pix", "/home/u/.pi/*"), false);
+});
+
+test("a slash after a space is a command pattern, not a folder", () => {
+  assert.equal(wildcardMatch("ls /tmp", "ls /*"), true);
+  assert.equal(wildcardMatch("ls", "ls /*"), false);
 });
