@@ -11,8 +11,8 @@
  *   - `sh -c '...'`, `eval`, and nested quoting are not expanded
  *   - aliases and shell functions are invisible
  *   - a wrapper with an unusual option-value pair may misattribute a command
- *   - `cd` rebases later segments, but pipes, subshells, and pushd/popd are
- *     not modeled, so the base can be wrong after those
+ *   - `cd` rebases later segments, but pipes, pushd/popd, and a `cd` inside a
+ *     subshell are not modeled, so the base can be wrong after those
  */
 
 import * as os from "node:os";
@@ -141,6 +141,10 @@ const TWO_WORD_COMMANDS = new Set([
 const SUBSTITUTION = /\$\(|`|\$\{/;
 const INDIRECT = /(^|\s)-exec(dir)?(\s|$)/;
 const OPERATORS = new Set([">", ">>", ">>>", "<", "<<", "<<<", "2>", "2>>", "&>", "|&"]);
+/** A redirection token: optional fd digits, a redirect operator, then any target. */
+const REDIRECTION = /^\d*(?:&>>?|>>>|>>|>|<<<|<<-|<<|<)/;
+/** A bare redirect operator, so the following token is its target or delimiter. */
+const REDIRECTION_OPERATOR = /^\d*(?:&>>?|>>>|>>|>|<<<|<<-|<<|<)$/;
 
 export const SUBSTITUTION_FAMILY = "(subshell)";
 export const INDIRECT_FAMILY = "(indirect)";
@@ -254,6 +258,61 @@ function opensHeredoc(segment: string): boolean {
 function shellText(segment: string): string {
   const newline = segment.indexOf("\n");
   return newline !== -1 && opensHeredoc(segment) ? segment.slice(0, newline) : segment;
+}
+
+/** Count unquoted parentheses, which are the only ones that can group commands. */
+function unquotedParens(text: string): { opens: number[]; closes: number[] } {
+  const opens: number[] = [];
+  const closes: number[] = [];
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      if (ch === "\\" && quote === '"') i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch === "(") opens.push(i);
+    else if (ch === ")") closes.push(i);
+  }
+
+  return { opens, closes };
+}
+
+/**
+ * Drop the parentheses that group a command list. A subshell splits at the
+ * same operators as the rest of the line, so an opening `(` lands at the start
+ * of a segment and its `)` lands at the end of another. Quoted parens stay
+ * inside their token, and balanced parens that belong to `$(...)` are left
+ * alone so the substitution is still visible to the rules.
+ */
+function stripGroupingParens(segment: string): string {
+  const trimmed = segment.trim();
+  if (!trimmed.includes("(") && !trimmed.includes(")")) return trimmed;
+
+  const { opens, closes } = unquotedParens(trimmed);
+  let lead = 0;
+  while (trimmed[lead] === "(") lead++;
+
+  const limit = lead > 0 ? lead : Math.max(0, closes.length - opens.length);
+  const closeSet = new Set(closes);
+  let end = trimmed.length;
+  let removed = 0;
+  while (removed < limit && end > 0 && trimmed[end - 1] === ")" && closeSet.has(end - 1)) {
+    end--;
+    removed++;
+  }
+
+  return trimmed.slice(lead, end);
 }
 
 /** Split a command line into sub-commands at unquoted shell operators. */
@@ -436,8 +495,11 @@ function looksLikePath(token: string): boolean {
 }
 
 /**
- * Read redirection targets, skipping over quoted text so a `<` or `>` inside
- * a sed or awk program is not mistaken for a shell operator.
+ * Read redirection targets in both directions, skipping over quoted text so a
+ * `<` or `>` inside a sed or awk program is not mistaken for a shell operator.
+ * Heredocs carry data, not a file, and `>&2`/`<&3` duplicate a descriptor, so
+ * neither yields a target. The null device is not a project file and is dropped
+ * in both directions; counting it makes the gate ask to approve `/dev`.
  */
 function redirectionTargets(segment: string): string[] {
   const targets: string[] = [];
@@ -459,10 +521,20 @@ function redirectionTargets(segment: string): string[] {
       i++;
       continue;
     }
-    if (ch !== ">") continue;
+
+    const output = ch === ">";
+    const input = ch === "<";
+    if (!output && !input) continue;
+
+    const next = segment[i + 1];
+    if (input && next === "<") {
+      while (segment[i + 1] === "<") i++;
+      continue;
+    }
+    if (next === "&") continue;
 
     let j = i + 1;
-    while (segment[j] === ">") j++;
+    while (segment[j] === ch) j++;
     while (j < segment.length && /\s/.test(segment[j]!)) j++;
 
     let target = "";
@@ -501,18 +573,18 @@ function redirectionTargets(segment: string): string[] {
  * The operands of a command. Script commands can drop a flag's separate value
  * so `grep -A 25 pattern file` does not read `25` as a path. Other commands
  * keep every non-flag token, since flags like `tail -f` take no value.
+ * Redirect operators and their targets are never operands.
  */
 function positionalArgs(rest: string[], skipFlagValues: boolean): string[] {
   const out: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const token = rest[i]!;
-    // Heredoc operators and their delimiters are not operands; the delimiter
-    // names the terminator, not a path.
-    if (token === "<<" || token === "<<-" || token === "<<<") {
-      i++;
+    // A bare redirect consumes the next token (a target or heredoc delimiter).
+    // Attached forms such as `2>&1` or `</dev/null` are one token.
+    if (REDIRECTION.test(token)) {
+      if (REDIRECTION_OPERATOR.test(token)) i++;
       continue;
     }
-    if (token.startsWith("<<")) continue;
     if (OPERATORS.has(token)) continue;
     if (isFlag(token)) {
       if (skipFlagValues && SCRIPT_FLAG_WITH_VALUE.has(token)) i++;
@@ -586,7 +658,7 @@ export function analyzeBash(command: string, cwd: string): BashSegment[] {
   let effectiveCwd = cwd;
 
   for (const segment of splitCommands(command)) {
-    const shell = shellText(segment);
+    const shell = stripGroupingParens(shellText(segment));
     const tokens = tokenize(shell);
 
     if (tokens.length === 0) {

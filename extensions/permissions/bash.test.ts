@@ -68,6 +68,32 @@ test("analyzeBash reports the cd target when no segment names a file", () => {
   assert.deepEqual(cd.paths, ["/other/project/src/core"]);
 });
 
+test("analyzeBash reads a subshell as grouping, not as part of the command name", () => {
+  // Without paren handling the inner command is named `(timeout`, so a
+  // `timeout *` rule never matches and the pipe target is named `head -60)`.
+  const command = "cd /tmp && (timeout 90 npx -y skills find typescript < /dev/null 2>&1 | head -60)";
+  const segments = analyzeBash(command, "/work");
+
+  const timeout = segments.find((segment) => segment.patterns.includes("timeout"));
+  assert.ok(timeout, `expected a timeout segment, got ${JSON.stringify(segments.map((s) => s.patterns))}`);
+  assert.deepEqual(timeout.patterns, [
+    "timeout 90 npx -y skills find typescript < /dev/null 2>&1",
+    "timeout",
+  ]);
+
+  const head = segments.find((segment) => segment.patterns.includes("head"));
+  assert.ok(head, "expected a head segment");
+  assert.deepEqual(head.patterns, ["head -60", "head"]);
+});
+
+test("analyzeBash ignores an input redirect to /dev/null", () => {
+  // The null device is not a project file. Counting it makes the gate ask for
+  // /dev, which nobody wants to approve.
+  const command = "cd /tmp && (timeout 90 npx -y skills find typescript < /dev/null 2>&1 | head -60)";
+  const paths = analyzeBash(command, "/work").flatMap((segment) => segment.paths);
+  assert.deepEqual(paths, ["/tmp"]);
+});
+
 test("analyzeBash collects a bare filename argument to grep", () => {
   // A slashless name is still a filesystem path for a script command; the
   // `looksLikePath` filter drops it and hides the read.
