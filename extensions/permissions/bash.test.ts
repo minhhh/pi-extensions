@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeBash, splitCommands } from "./bash.ts";
+import { analyzeBash, splitCommands, SUBSTITUTION_FAMILY } from "./bash.ts";
 import { collapseFolders } from "./wildcard.ts";
 
 test("splitCommands keeps file descriptor redirections intact", () => {
@@ -94,6 +94,65 @@ test("analyzeBash ignores an input redirect to /dev/null", () => {
   assert.deepEqual(paths, ["/tmp"]);
 });
 
+test("analyzeBash keeps a command substitution inside an assignment whole", () => {
+  // Splitting at the spaces inside `$(...)` drops the `desc=` prefix and
+  // promotes the awk program to the command name, so a `print; exit` fragment
+  // becomes the suggested always-grant.
+  const command = `desc=$(awk '/^description:/{sub(/^description: */,""); print; exit}' "$f")`;
+  const segment = analyzeBash(command, "/work")[0]!;
+  assert.deepEqual(segment.patterns, [SUBSTITUTION_FAMILY]);
+  assert.deepEqual(segment.always, [SUBSTITUTION_FAMILY]);
+});
+
+test("analyzeBash does not leak a $() assignment value as a command in a for loop", () => {
+  const command =
+    'cd /Users/alex/gitrepos/local_tools/agent-skills && for d in skills/*/; do n=$(basename "$d"); f="$d/SKILL.md"; [ -f "$f" ] || continue; desc=$(awk \'/^description:/{sub(/^description: */,""); print; exit}\' "$f"); echo "$n :: ${desc:0:120}"; done';
+  const segments = analyzeBash(command, "/work");
+
+  for (const segment of segments) {
+    assert.ok(
+      ![segment.patterns, segment.always].flat().some((pattern) => pattern.includes("print; exit}")),
+      `awk program leaked into the parse: ${JSON.stringify({ patterns: segment.patterns, always: segment.always })}`,
+    );
+  }
+
+  const segmentFor = (needle: string): (typeof segments)[number] => {
+    const segment = segments.find((candidate) => candidate.display.includes(needle));
+    assert.ok(segment, `expected a segment containing ${needle}`);
+    return segment;
+  };
+
+  // `do` and the assignment are dropped, so the hidden `basename` call is only
+  // visible as `(subshell)`.
+  assert.deepEqual(segmentFor("basename").patterns, [SUBSTITUTION_FAMILY]);
+  // `for`, `done`, and `continue` name no program, but the `for` glob still
+  // counts as a path.
+  assert.deepEqual(segmentFor("for d in").patterns, []);
+  assert.deepEqual(segmentFor("for d in").paths, [
+    "/Users/alex/gitrepos/local_tools/agent-skills/skills/*",
+  ]);
+  assert.deepEqual(segmentFor("continue").patterns, []);
+  assert.deepEqual(segmentFor("done").patterns, []);
+  // The conditional is a builtin, not a program; its only path argument is
+  // already read by `collectPaths`.
+  assert.deepEqual(segmentFor("[ -f").patterns, []);
+});
+
+test("analyzeBash does not treat shell keywords as commands", () => {
+  const command = 'for d in skills/*/; do echo "$d"; done; continue';
+  const segments = analyzeBash(command, "/work");
+
+  assert.deepEqual(
+    segments.map((segment) => segment.patterns),
+    [[], ["echo $d", "echo"], [], []],
+  );
+  assert.deepEqual(segments[0]!.paths, ["/work/skills/*"]);
+  assert.deepEqual(segments[0]!.always, []);
+  assert.deepEqual(segments[1]!.always, ["echo *"]);
+  assert.deepEqual(segments[2]!.always, []);
+  assert.deepEqual(segments[3]!.always, []);
+});
+
 test("analyzeBash collects a bare filename argument to grep", () => {
   // A slashless name is still a filesystem path for a script command; the
   // `looksLikePath` filter drops it and hides the read.
@@ -119,14 +178,14 @@ test("analyzeBash does not read a grep flag value as a path", () => {
 
 test("nested external folders in one command collapse to the outermost", () => {
   const command =
-    "ls -la /Users/minh/temp/test/ && ls -la /Users/minh/temp/test/folder_2/folder_9/ 2>&1; ls -la /Users/minh/temp/test/folder_1";
+    "ls -la /Users/alex/temp/test/ && ls -la /Users/alex/temp/test/folder_2/folder_9/ 2>&1; ls -la /Users/alex/temp/test/folder_1";
   const paths = analyzeBash(command, "/work").flatMap((segment) => segment.paths);
   assert.deepEqual(paths.sort(), [
-    "/Users/minh/temp/test",
-    "/Users/minh/temp/test/folder_1",
-    "/Users/minh/temp/test/folder_2/folder_9",
+    "/Users/alex/temp/test",
+    "/Users/alex/temp/test/folder_1",
+    "/Users/alex/temp/test/folder_2/folder_9",
   ]);
-  assert.deepEqual(collapseFolders(paths), ["/Users/minh/temp/test"]);
+  assert.deepEqual(collapseFolders(paths), ["/Users/alex/temp/test"]);
 });
 
 test("splitCommands keeps a heredoc body with its header, not as commands", () => {

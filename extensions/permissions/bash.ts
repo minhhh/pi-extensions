@@ -47,6 +47,15 @@ const WRAPPER_OPTION_WITH_VALUE = new Set([
 
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
+/**
+ * Words that can start a line but never name a program to match against a
+ * rule: shell keywords, plus the `[`/`test` conditionals. `do` prefixes the
+ * body command, so it is dropped before parsing what follows. The rest are
+ * path-only; a `for` header still contributes its word list, and `collectPaths`
+ * still reads a conditional's path argument.
+ */
+const NON_COMMAND_HEADS = new Set(["for", "do", "done", "continue", "[", "test"]);
+
 /** Commands whose bare arguments are paths even without a slash in them. */
 const PATH_COMMANDS = new Set([
   "rm",
@@ -405,11 +414,12 @@ export function splitCommands(input: string): string[] {
   return parts.map((p) => p.trim()).filter(Boolean);
 }
 
-/** Split one sub-command into tokens, respecting quotes. */
+/** Split one sub-command into tokens, respecting quotes and `$(...)` nesting. */
 function tokenize(segment: string): string[] {
   const tokens: string[] = [];
   let current = "";
   let quote: '"' | "'" | null = null;
+  let substitution = 0;
   let started = false;
 
   for (let i = 0; i < segment.length; i++) {
@@ -441,7 +451,28 @@ function tokenize(segment: string): string[] {
       continue;
     }
 
+    // Whitespace inside `$(...)` belongs to the substitution, so
+    // `x=$(cmd a)` stays one token instead of leaking `cmd` as a command.
+    if (ch === "(" && segment[i - 1] === "$") {
+      substitution++;
+      current += ch;
+      started = true;
+      continue;
+    }
+
+    if (ch === ")" && substitution > 0) {
+      substitution--;
+      current += ch;
+      started = true;
+      continue;
+    }
+
     if (/\s/.test(ch)) {
+      if (substitution > 0) {
+        current += ch;
+        started = true;
+        continue;
+      }
       if (started || current) tokens.push(current);
       current = "";
       started = false;
@@ -673,13 +704,40 @@ export function analyzeBash(command: string, cwd: string): BashSegment[] {
       continue;
     }
 
-    const { families, rest } = splitFamilies(tokens);
-    const primary = families[families.length - 1] ?? "";
-
-    const patterns = commandPatterns(tokens, families, primary, rest);
-    const always = approvalPatterns(primary, rest);
+    // A shell keyword names no program. `do` prefixes the body command, so
+    // drop it and parse the rest; the others are handled as path-only.
+    let words = tokens;
+    while (words[0] === "do") words = words.slice(1);
 
     const substitution = SUBSTITUTION.test(shell);
+    const indirect = INDIRECT.test(shell) || words.includes("xargs");
+
+    if (words.length === 0 || NON_COMMAND_HEADS.has(words[0]!)) {
+      const patterns: string[] = [];
+      const always: string[] = [];
+      if (substitution) {
+        patterns.push(SUBSTITUTION_FAMILY);
+        always.push(SUBSTITUTION_FAMILY);
+      }
+      if (indirect) {
+        patterns.push(INDIRECT_FAMILY);
+        always.push(INDIRECT_FAMILY);
+      }
+      segments.push({
+        patterns,
+        paths: collectPaths(shell, "", words, effectiveCwd),
+        always,
+        display: `$ ${clip(segment)}`,
+      });
+      continue;
+    }
+
+    const { families, rest } = splitFamilies(words);
+    const primary = families[families.length - 1] ?? "";
+
+    const patterns = commandPatterns(words, families, primary, rest);
+    const always = approvalPatterns(primary, rest);
+
     if (substitution) {
       patterns.push(SUBSTITUTION_FAMILY);
       always.push(SUBSTITUTION_FAMILY);

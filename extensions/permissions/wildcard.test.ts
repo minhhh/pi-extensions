@@ -4,11 +4,11 @@ import { collapseFolders, expandHome, wildcardMatch } from "./wildcard.ts";
 
 test("collapseFolders keeps only the outermost folder", () => {
   const folders = [
-    "/Users/minh/temp/test",
-    "/Users/minh/temp/test/folder_2/folder_9",
-    "/Users/minh/temp/test/folder_1",
+    "/Users/alex/temp/test",
+    "/Users/alex/temp/test/folder_2/folder_9",
+    "/Users/alex/temp/test/folder_1",
   ];
-  assert.deepEqual(collapseFolders(folders), ["/Users/minh/temp/test"]);
+  assert.deepEqual(collapseFolders(folders), ["/Users/alex/temp/test"]);
 });
 
 test("collapseFolders keeps unrelated folders", () => {
