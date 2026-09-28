@@ -251,3 +251,48 @@ test("analyzeBash still runs the command after a heredoc terminator", () => {
     ["cat <<EOF", "echo done"],
   );
 });
+
+test("analyzeBash parses a for loop over quoted queries with piped filters", () => {
+  // A realistic skills-search loop. The quoted queries are loop data, so they
+  // are not paths; `$q` is a variable reference, not a substitution; the sed
+  // and grep expressions are programs, not files; and `< /dev/null` is not a
+  // read. Only the `cd` target touches the filesystem.
+  const command = `cd /tmp && for q in "typescript performance" "typescript security" "typescript code review"; do echo "##### $q #####";
+ timeout 90 npx -y skills find "$q" < /dev/null 2>&1 | sed 's/\\x1b\\[[0-9;]*m//g' | grep -iE 'typescript|^[a-z]' | head -22;
+ done`;
+
+  const segments = analyzeBash(command, "/work");
+  console.log(segments)
+
+  // The `for` header names no program, and its quoted queries are not paths.
+  const header = segments.find((segment) => segment.display.includes("for q in"));
+  assert.ok(header, `expected a for header, got ${JSON.stringify(segments.map((s) => s.display))}`);
+  assert.deepEqual(header.patterns, []);
+  assert.deepEqual(header.always, []);
+  assert.deepEqual(header.paths, []);
+
+  // `$q` is a variable, so no segment should claim a hidden subshell.
+  for (const segment of segments) {
+    assert.ok(
+      !segment.patterns.includes(SUBSTITUTION_FAMILY),
+      `unexpected ${SUBSTITUTION_FAMILY} in ${JSON.stringify(segment.patterns)}`,
+    );
+  }
+
+  // The sed and grep expressions are scripts; neither becomes a path, and the
+  // null device is dropped. The `cd` target is the only path touched.
+  assert.deepEqual(segments.flatMap((segment) => segment.paths), ["/tmp"]);
+
+  assert.deepEqual(segments.find((segment) => segment.patterns.includes("sed"))!.patterns, [
+    "sed s/\\x1b\\[[0-9;]*m//g",
+    "sed",
+  ]);
+  assert.deepEqual(segments.find((segment) => segment.patterns.includes("grep"))!.patterns, [
+    "grep -iE typescript|^[a-z]",
+    "grep",
+  ]);
+  assert.deepEqual(segments.find((segment) => segment.patterns.includes("timeout"))!.patterns, [
+    "timeout 90 npx -y skills find $q < /dev/null 2>&1",
+    "timeout",
+  ]);
+});
