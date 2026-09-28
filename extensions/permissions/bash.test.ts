@@ -125,9 +125,9 @@ test("analyzeBash does not leak a $() assignment value as a command in a for loo
   // `do` and the assignment are dropped, so the hidden `basename` call is only
   // visible as `(subshell)`.
   assert.deepEqual(segmentFor("basename").patterns, [SUBSTITUTION_FAMILY]);
-  // `for`, `done`, and `continue` name no program, but the `for` glob still
-  // counts as a path.
-  assert.deepEqual(segmentFor("for d in").patterns, []);
+  // `for` stays matchable so a rule can cover the header. The other keywords
+  // and the conditional are path-only.
+  assert.deepEqual(segmentFor("for d in").patterns, ["for d in skills/*/", "for"]);
   assert.deepEqual(segmentFor("for d in").paths, [
     "/Users/alex/gitrepos/local_tools/agent-skills/skills/*",
   ]);
@@ -138,16 +138,18 @@ test("analyzeBash does not leak a $() assignment value as a command in a for loo
   assert.deepEqual(segmentFor("[ -f").patterns, []);
 });
 
-test("analyzeBash does not treat shell keywords as commands", () => {
+test("analyzeBash treats `for` as a matchable candidate and leaves other keywords path-only", () => {
+  // `for` needs a pattern so a rule can match the header and the prompt can
+  // offer an always-grant. The other keywords stay path-only.
   const command = 'for d in skills/*/; do echo "$d"; done; continue';
   const segments = analyzeBash(command, "/work");
 
   assert.deepEqual(
     segments.map((segment) => segment.patterns),
-    [[], ["echo $d", "echo"], [], []],
+    [["for d in skills/*/", "for"], ["echo $d", "echo"], [], []],
   );
   assert.deepEqual(segments[0]!.paths, ["/work/skills/*"]);
-  assert.deepEqual(segments[0]!.always, []);
+  assert.deepEqual(segments[0]!.always, ["for *"]);
   assert.deepEqual(segments[1]!.always, ["echo *"]);
   assert.deepEqual(segments[2]!.always, []);
   assert.deepEqual(segments[3]!.always, []);
@@ -262,13 +264,15 @@ test("analyzeBash parses a for loop over quoted queries with piped filters", () 
  done`;
 
   const segments = analyzeBash(command, "/work");
-  console.log(segments)
 
-  // The `for` header names no program, and its quoted queries are not paths.
+  // The `for` header stays matchable, and its quoted queries are not paths.
   const header = segments.find((segment) => segment.display.includes("for q in"));
   assert.ok(header, `expected a for header, got ${JSON.stringify(segments.map((s) => s.display))}`);
-  assert.deepEqual(header.patterns, []);
-  assert.deepEqual(header.always, []);
+  assert.deepEqual(header.patterns, [
+    "for q in typescript performance typescript security typescript code review",
+    "for",
+  ]);
+  assert.deepEqual(header.always, ["for *"]);
   assert.deepEqual(header.paths, []);
 
   // `$q` is a variable, so no segment should claim a hidden subshell.
@@ -295,4 +299,22 @@ test("analyzeBash parses a for loop over quoted queries with piped filters", () 
     "timeout 90 npx -y skills find $q < /dev/null 2>&1",
     "timeout",
   ]);
+});
+
+test("analyzeBash parses a for loop over repo slugs and a curl pipeline", () => {
+  // The loop words are slugs (`owner/repo`). `for` stays matchable so a rule can
+  // cover the header and the prompt can offer `for *`.
+  const command =
+    'for r in mdproctor/cc-praxis affaan-m/ECC wshobson/agents jeffallan/claude-skills backnotprop/pstack sickn33/agentic-awesome-skills dotneet/claude-code-marketplace; do echo "=== $r ==="; curl -s "https://api.github.com/repos/$r/license" | grep -E \'"spdx_id"|"name":\' | head -3; done';
+  const segments = analyzeBash(command, "/work");
+
+  const header = segments.find((segment) => segment.display.includes("for r in"))!;
+  assert.deepEqual(header.patterns, [
+    "for r in mdproctor/cc-praxis affaan-m/ECC wshobson/agents jeffallan/claude-skills backnotprop/pstack sickn33/agentic-awesome-skills dotneet/claude-code-marketplace",
+    "for",
+  ]);
+  assert.deepEqual(header.always, ["for *"]);
+
+  const curl = segments.find((segment) => segment.patterns.includes("curl"))!;
+  assert.deepEqual(curl.patterns, ["curl -s https://api.github.com/repos/$r/license", "curl"]);
 });

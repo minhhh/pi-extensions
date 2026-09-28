@@ -53,8 +53,12 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
  * body command, so it is dropped before parsing what follows. The rest are
  * path-only; a `for` header still contributes its word list, and `collectPaths`
  * still reads a conditional's path argument.
+ *
+ * `for` is deliberately absent. An empty pattern list can never match a rule,
+ * so the gate would ask on every run and the prompt would offer no
+ * always-grant. Keeping `for` as a candidate lets a rule cover the header.
  */
-const NON_COMMAND_HEADS = new Set(["for", "do", "done", "continue", "[", "test"]);
+const NON_COMMAND_HEADS = new Set(["do", "done", "continue", "[", "test"]);
 
 /** Commands whose bare arguments are paths even without a slash in them. */
 const PATH_COMMANDS = new Set([
