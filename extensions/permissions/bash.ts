@@ -175,6 +175,16 @@ export interface BashSegment {
   display: string;
 }
 
+/**
+ * Segments that carry a matchable command. A keyword-only segment such as
+ * `done` or `continue` has no pattern, and no rule can match an empty pattern
+ * list, so a request for it would always fall through to `ask` and prompt for
+ * a word that does nothing. Any paths it touched are gated separately.
+ */
+export function matchableSegments(segments: readonly BashSegment[]): BashSegment[] {
+  return segments.filter((segment) => segment.patterns.length > 0);
+}
+
 function clip(text: string, max = 80): string {
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
 }

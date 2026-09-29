@@ -23,7 +23,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
-import { analyzeBash, resolveUserPath, type BashSegment } from "./bash.ts";
+import { analyzeBash, matchableSegments, resolveUserPath, type BashSegment } from "./bash.ts";
 import { canonicalPermission, loadConfig } from "./config.ts";
 import { buildMenu, describeRules } from "./grants.ts";
 import { describeRule, resolveRequest, rulesForPermission } from "./rules.ts";
@@ -312,6 +312,8 @@ function bashRequests(segments: readonly BashSegment[], cwd: string): Permission
   const requests: PermissionRequest[] = [];
   for (const segment of segments) {
     for (const path of segment.paths) addExternalFolder(external, path, path, cwd);
+  }
+  for (const segment of matchableSegments(segments)) {
     requests.push({
       permission: "bash",
       patterns: segment.patterns,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyzeBash, splitCommands, SUBSTITUTION_FAMILY } from "./bash.ts";
+import { analyzeBash, matchableSegments, splitCommands, SUBSTITUTION_FAMILY } from "./bash.ts";
 import { sessionAlways } from "./types.ts";
 import { collapseFolders } from "./wildcard.ts";
 
@@ -155,6 +155,23 @@ test("analyzeBash treats `for` as a matchable candidate and leaves other keyword
   assert.deepEqual(segments[1]!.always, [sessionAlways("echo *")]);
   assert.deepEqual(segments[2]!.always, []);
   assert.deepEqual(segments[3]!.always, []);
+});
+
+test("matchableSegments drops keyword-only segments so `done` is never asked", () => {
+  // A `done` segment has no pattern, and no rule matches an empty pattern list,
+  // so its request would always resolve to `ask`. The gate would prompt for a
+  // word that runs nothing. It is dropped before a request is built.
+  const command = 'for d in a b; do echo "$d"; done';
+  const segments = analyzeBash(command, "/work");
+  assert.equal(segments.at(-1)!.display, "$ done");
+  assert.deepEqual(segments.at(-1)!.patterns, []);
+
+  const kept = matchableSegments(segments);
+  assert.ok(!kept.some((segment) => segment.display === "$ done"), "`done` should not produce a request");
+  assert.deepEqual(
+    kept.map((segment) => segment.display),
+    ["$ for d in a b", '$ do echo "$d"'],
+  );
 });
 
 test("analyzeBash collects a bare filename argument to grep", () => {
