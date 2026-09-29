@@ -14,6 +14,7 @@ import test from "node:test";
 import { BUILTIN_RULES } from "./config.ts";
 import { resolveRequest } from "./rules.ts";
 import type { LoadedConfig, PermissionRequest } from "./types.ts";
+import { sessionAlways } from "./types.ts";
 import { expandHome, pathPatterns, wildcardMatch } from "./wildcard.ts";
 
 const HOME = os.homedir();
@@ -37,7 +38,7 @@ function externalRequest(folder: string): PermissionRequest {
   return {
     permission: "external_directory",
     patterns: pathPatterns(folder, HOME),
-    always: [folder],
+    always: [sessionAlways(folder)],
     display: `  ← Access external directory ${folder}`,
   };
 }

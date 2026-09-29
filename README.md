@@ -191,13 +191,14 @@ by a later user rule with the same scope.
 
 ### What ask does
 
-The prompt offers three outcomes:
+The prompt offers these outcomes:
 
 - `Allow once` runs just this request
-- `Allow always` approves the request's suggested patterns for the rest of the
-  session. Shell commands suggest a durable prefix such as `git status *`. Other
-  tools suggest `*`, shown in the prompt as `<tool> *`. Picking this asks once
-  more with the exact rules before granting them.
+- `Allow always` approves one choice's patterns for the rest of the session. A
+  request can offer several always choices, narrow first and broad after. Shell
+  commands suggest a durable prefix such as `git status *`. Other tools suggest
+  `*`, shown in the prompt as `<tool> *`. Picking one asks once more with the
+  exact rules before granting them.
 - `Deny` blocks the request
 
 Requests are collapsed before prompting. Nested external folders reduce to the

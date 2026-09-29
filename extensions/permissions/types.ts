@@ -44,6 +44,26 @@ export interface PermissionRule {
   action: Decision;
 }
 
+/**
+ * One "always" choice in a prompt.
+ *
+ * A request carries a list of these, and position in that list is the order the
+ * prompt shows them: put the narrow choice first and the broad one after. A
+ * choice can hold several patterns because approving one thing can require
+ * approving another: `git push *` and `(subshell)` are granted together.
+ */
+export interface AlwaysOption {
+  /** Patterns added as session allows when this choice is picked. */
+  patterns: string[];
+  /** Picker text. Callers derive one from `patterns` when it is omitted. */
+  label?: string;
+}
+
+/** A single session-scoped always choice covering the given patterns. */
+export function sessionAlways(...patterns: string[]): AlwaysOption {
+  return { patterns: patterns.filter((pattern) => pattern.length > 0) };
+}
+
 /** One thing the model is trying to do, ready for evaluation. */
 export interface PermissionRequest {
   permission: Permission;
@@ -52,8 +72,8 @@ export interface PermissionRequest {
    * when its pattern matches any one.
    */
   patterns: string[];
-  /** Patterns added as session allows when the user picks "always". */
-  always: string[];
+  /** Always choices in display order. Empty means the prompt offers no always. */
+  always: AlwaysOption[];
   /** Human-readable summary shown in prompts and block reasons. */
   display: string;
 }

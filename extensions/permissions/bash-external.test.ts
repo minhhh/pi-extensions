@@ -15,6 +15,7 @@ import test, { after } from "node:test";
 import { analyzeBash } from "./bash.ts";
 import { mergeExternal } from "./requests.ts";
 import type { PermissionRequest } from "./types.ts";
+import { sessionAlways } from "./types.ts";
 import { isExternal, pathPatterns } from "./wildcard.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-bash-"));
@@ -44,10 +45,10 @@ function externalFolders(command: string, cwd: string): string[] {
   const requests: PermissionRequest[] = [...folders].map((folder) => ({
     permission: "external_directory",
     patterns: pathPatterns(folder),
-    always: [folder],
+    always: [sessionAlways(folder)],
     display: "",
   }));
-  return mergeExternal(requests).map((request) => request.always[0]!);
+  return mergeExternal(requests).map((request) => request.always[0]!.patterns[0]!);
 }
 
 test("cd then relative reads asks for the cd tree, not root", () => {

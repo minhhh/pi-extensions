@@ -7,14 +7,14 @@
  * merging here never widens what is allowed.
  */
 
-import type { PermissionRequest } from "./types.ts";
+import type { AlwaysOption, PermissionRequest } from "./types.ts";
 import { collapseFolders } from "./wildcard.ts";
 
 /** Drop external folders that sit inside another folder in the list. */
 export function mergeExternal(requests: readonly PermissionRequest[]): PermissionRequest[] {
   const byFolder = new Map<string, PermissionRequest>();
   for (const request of requests) {
-    const folder = request.always[0];
+    const folder = request.always[0]?.patterns[0];
     if (folder !== undefined && !byFolder.has(folder)) byFolder.set(folder, request);
   }
   const kept = new Set(collapseFolders([...byFolder.keys()]));
@@ -39,7 +39,26 @@ function mergeRequests(requests: readonly PermissionRequest[]): PermissionReques
   return {
     permission: first.permission,
     patterns: [...new Set(requests.flatMap((request) => request.patterns))],
-    always: [...new Set(requests.flatMap((request) => request.always))],
+    always: mergeAlways(requests),
     display: requests.map((request) => request.display).join("\n"),
   };
+}
+
+/**
+ * Union the always choices of coalesced requests, keeping first-seen order so
+ * the narrow choice stays ahead of the broad one. Duplicate choices collapse by
+ * their patterns.
+ */
+function mergeAlways(requests: readonly PermissionRequest[]): AlwaysOption[] {
+  const seen = new Set<string>();
+  const merged: AlwaysOption[] = [];
+  for (const request of requests) {
+    for (const option of request.always) {
+      const key = option.patterns.join("\u0000");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(option);
+    }
+  }
+  return merged;
 }

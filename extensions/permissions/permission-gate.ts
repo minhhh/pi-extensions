@@ -27,7 +27,7 @@ import { analyzeBash, resolveUserPath, type BashSegment } from "./bash.ts";
 import { canonicalPermission, loadConfig } from "./config.ts";
 import { buildMenu, describeRules } from "./grants.ts";
 import { describeRule, resolveRequest, rulesForPermission } from "./rules.ts";
-import type { Decision, LoadedConfig, PermissionRequest, PermissionRule, RulePermission } from "./types.ts";
+import { sessionAlways, type Decision, type LoadedConfig, type PermissionRequest, type PermissionRule, type RulePermission } from "./types.ts";
 import { log, logPath, template } from "./utils.ts";
 import { isExternal, pathPatterns } from "./wildcard.ts";
 import { coalesceAsks, mergeExternal } from "./requests.ts";
@@ -87,9 +87,9 @@ export default function permissionsExtension(pi: ExtensionAPI): void {
     }
   };
 
-  /** Prompt with Pi's outcomes: once, always, reject. */
+  /** Prompt with Pi's outcomes: once, one choice per always option, reject. */
   const confirm = async (request: PermissionRequest, ctx: ExtensionContext): Promise<boolean> => {
-    const options = buildMenu(request);
+    const options = buildMenu(request, alwaysLabel);
     const labels = ["Allow once", ...options.map((option) => option.label)];
 
     const choice = await ctx.ui.select(requestText(request), labels);
@@ -277,6 +277,12 @@ function allowText(rules: readonly PermissionRule[]): string {
   }
 }
 
+/** One-line picker text for an always choice, e.g. `Allow always: git push *`. */
+function alwaysLabel(rules: readonly PermissionRule[]): string {
+  const display = permissionDisplay(rules[0]!.permission);
+  return `Allow always: ${rules.map((rule) => rulePattern(rule, display)).join(", ")}`;
+}
+
 function rulePattern(rule: PermissionRule, display: PermissionDisplayType): string {
   if (display === "external") return `${rule.pattern}/*`;
   if (rule.pattern === "*") return `${rule.permission} *`;
@@ -284,7 +290,10 @@ function rulePattern(rule: PermissionRule, display: PermissionDisplayType): stri
 }
 
 function patternLine(request: PermissionRequest): string {
-  return request.always.map((folder) => `- ${folder}/*`).join("\n");
+  return request.always
+    .flatMap((option) => option.patterns)
+    .map((folder) => `- ${folder}/*`)
+    .join("\n");
 }
 
 function addExternalFolder(requests: PermissionRequest[], abs: string, display: string, cwd: string): void {
@@ -293,7 +302,7 @@ function addExternalFolder(requests: PermissionRequest[], abs: string, display: 
   requests.push({
     permission: "external_directory",
     patterns: pathPatterns(folder),
-    always: [folder],
+    always: [sessionAlways(folder)],
     display: `  ← Access external directory ${folder}`,
   });
 }
@@ -325,7 +334,7 @@ function folderFor(abs: string): string {
 function pathRequest(permission: string, name: string, raw: string, cwd: string, external: PermissionRequest[]): PermissionRequest {
   const abs = resolveUserPath(raw, cwd);
   addExternalFolder(external, abs, raw, cwd);
-  return { permission, patterns: pathPatterns(abs), always: ["*"], display: `${name} ${raw}` };
+  return { permission, patterns: pathPatterns(abs), always: [sessionAlways("*")], display: `${name} ${raw}` };
 }
 
 function resourceField(input: Record<string, unknown>): string | undefined {
@@ -378,7 +387,7 @@ function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionReque
       const permission = event.toolName === "grep" ? "grep" : "glob";
       return [
         ...external,
-        { permission, patterns: [pattern], always: ["*"], display: `${event.toolName} ${pattern}` },
+        { permission, patterns: [pattern], always: [sessionAlways("*")], display: `${event.toolName} ${pattern}` },
       ];
     }
     default:
@@ -395,7 +404,7 @@ function generic(event: ToolCallEvent, input: Record<string, unknown>, cwd: stri
   if (typeof input.filePath === "string") addExternalFolder(external, resolveUserPath(input.filePath, cwd), input.filePath, cwd);
 
   return [
-    { permission, patterns: [resource], always: ["*"], display: `${event.toolName} ${resource}` },
+    { permission, patterns: [resource], always: [sessionAlways("*")], display: `${event.toolName} ${resource}` },
     ...mergeExternal(external),
   ];
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { analyzeBash, splitCommands, SUBSTITUTION_FAMILY } from "./bash.ts";
+import { sessionAlways } from "./types.ts";
 import { collapseFolders } from "./wildcard.ts";
 
 test("splitCommands keeps file descriptor redirections intact", () => {
@@ -101,7 +102,7 @@ test("analyzeBash keeps a command substitution inside an assignment whole", () =
   const command = `desc=$(awk '/^description:/{sub(/^description: */,""); print; exit}' "$f")`;
   const segment = analyzeBash(command, "/work")[0]!;
   assert.deepEqual(segment.patterns, [SUBSTITUTION_FAMILY]);
-  assert.deepEqual(segment.always, [SUBSTITUTION_FAMILY]);
+  assert.deepEqual(segment.always, [sessionAlways(SUBSTITUTION_FAMILY)]);
 });
 
 test("analyzeBash does not leak a $() assignment value as a command in a for loop", () => {
@@ -110,8 +111,9 @@ test("analyzeBash does not leak a $() assignment value as a command in a for loo
   const segments = analyzeBash(command, "/work");
 
   for (const segment of segments) {
+    const approved = segment.always.flatMap((option) => option.patterns);
     assert.ok(
-      ![segment.patterns, segment.always].flat().some((pattern) => pattern.includes("print; exit}")),
+      ![segment.patterns, approved].flat().some((pattern) => pattern.includes("print; exit}")),
       `awk program leaked into the parse: ${JSON.stringify({ patterns: segment.patterns, always: segment.always })}`,
     );
   }
@@ -149,8 +151,8 @@ test("analyzeBash treats `for` as a matchable candidate and leaves other keyword
     [["for d in skills/*/", "for"], ["echo $d", "echo"], [], []],
   );
   assert.deepEqual(segments[0]!.paths, ["/work/skills/*"]);
-  assert.deepEqual(segments[0]!.always, ["for *"]);
-  assert.deepEqual(segments[1]!.always, ["echo *"]);
+  assert.deepEqual(segments[0]!.always, [sessionAlways("for *")]);
+  assert.deepEqual(segments[1]!.always, [sessionAlways("echo *")]);
   assert.deepEqual(segments[2]!.always, []);
   assert.deepEqual(segments[3]!.always, []);
 });
@@ -272,7 +274,7 @@ test("analyzeBash parses a for loop over quoted queries with piped filters", () 
     "for q in typescript performance typescript security typescript code review",
     "for",
   ]);
-  assert.deepEqual(header.always, ["for *"]);
+  assert.deepEqual(header.always, [sessionAlways("for *")]);
   assert.deepEqual(header.paths, []);
 
   // `$q` is a variable, so no segment should claim a hidden subshell.
@@ -313,7 +315,7 @@ test("analyzeBash parses a for loop over repo slugs and a curl pipeline", () => 
     "for r in mdproctor/cc-praxis affaan-m/ECC wshobson/agents jeffallan/claude-skills backnotprop/pstack sickn33/agentic-awesome-skills dotneet/claude-code-marketplace",
     "for",
   ]);
-  assert.deepEqual(header.always, ["for *"]);
+  assert.deepEqual(header.always, [sessionAlways("for *")]);
 
   const curl = segments.find((segment) => segment.patterns.includes("curl"))!;
   assert.deepEqual(curl.patterns, ["curl -s https://api.github.com/repos/$r/license", "curl"]);

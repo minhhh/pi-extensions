@@ -18,6 +18,8 @@
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { sessionAlways, type AlwaysOption } from "./types.ts";
+
 const WRAPPERS = new Set([
   "sudo",
   "doas",
@@ -168,8 +170,8 @@ export interface BashSegment {
   patterns: string[];
   /** Resolved paths the segment touches. */
   paths: string[];
-  /** Patterns suggested for a session approval. */
-  always: string[];
+  /** Always choices for a session approval, specific first. */
+  always: AlwaysOption[];
   display: string;
 }
 
@@ -701,7 +703,7 @@ export function analyzeBash(command: string, cwd: string): BashSegment[] {
         segments.push({
           patterns: [SUBSTITUTION_FAMILY],
           paths: [],
-          always: [SUBSTITUTION_FAMILY],
+          always: [sessionAlways(SUBSTITUTION_FAMILY)],
           display: `$ ${clip(segment)}`,
         });
       }
@@ -718,19 +720,19 @@ export function analyzeBash(command: string, cwd: string): BashSegment[] {
 
     if (words.length === 0 || NON_COMMAND_HEADS.has(words[0]!)) {
       const patterns: string[] = [];
-      const always: string[] = [];
+      const approved: string[] = [];
       if (substitution) {
         patterns.push(SUBSTITUTION_FAMILY);
-        always.push(SUBSTITUTION_FAMILY);
+        approved.push(SUBSTITUTION_FAMILY);
       }
       if (indirect) {
         patterns.push(INDIRECT_FAMILY);
-        always.push(INDIRECT_FAMILY);
+        approved.push(INDIRECT_FAMILY);
       }
       segments.push({
         patterns,
         paths: collectPaths(shell, "", words, effectiveCwd),
-        always,
+        always: approved.length > 0 ? [sessionAlways(...approved)] : [],
         display: `$ ${clip(segment)}`,
       });
       continue;
@@ -740,15 +742,15 @@ export function analyzeBash(command: string, cwd: string): BashSegment[] {
     const primary = families[families.length - 1] ?? "";
 
     const patterns = commandPatterns(words, families, primary, rest);
-    const always = approvalPatterns(primary, rest);
+    const approved = approvalPatterns(primary, rest);
 
     if (substitution) {
       patterns.push(SUBSTITUTION_FAMILY);
-      always.push(SUBSTITUTION_FAMILY);
+      approved.push(SUBSTITUTION_FAMILY);
     }
     if (INDIRECT.test(shell) || families.includes("xargs")) {
       patterns.push(INDIRECT_FAMILY);
-      always.push(INDIRECT_FAMILY);
+      approved.push(INDIRECT_FAMILY);
     }
 
     let paths: string[];
@@ -760,7 +762,12 @@ export function analyzeBash(command: string, cwd: string): BashSegment[] {
       paths = collectPaths(shell, primary, rest, effectiveCwd);
     }
 
-    segments.push({ patterns, paths, always, display: `$ ${clip(segment)}` });
+    segments.push({
+      patterns,
+      paths,
+      always: approved.length > 0 ? [sessionAlways(...approved)] : [],
+      display: `$ ${clip(segment)}`,
+    });
   }
 
   return segments;
