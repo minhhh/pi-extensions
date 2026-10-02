@@ -217,10 +217,12 @@ the decision and the rules behind it.
 
 ### Log
 
-Logging is off by default. To turn it on, set `LOG_ENABLED` to `true` in
-`utils.ts`; every decision, config warning, granted rule, and doom-loop trigger
-then appends a timestamped line to `<agent-dir>/permissions.log`. Writing is
-best effort, so a full disk or bad permissions never changes a decision.
+Logging is off by default. Set `PI_PERMISSIONS_LOG=1` to append a timestamped
+line to `<agent-dir>/permissions.log` for every decision, config warning,
+granted rule, and doom-loop trigger. The log holds decisions and metadata only,
+never the arguments a call carries, so commands and file bodies stay out of it.
+It is truncated once it passes 1 MiB. Writing is best effort, so a full disk or
+bad permissions never changes a decision.
 
 ### Auto mode
 

@@ -2,15 +2,20 @@
  * Small shared helpers for the permissions extension.
  */
 
-import { appendFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { appendFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 let logFile: string | undefined;
 
-/** Flip this to true to start appending to `<agent-dir>/permissions.log`. */
-const LOG_ENABLED = true;
+/** Opt in with `PI_PERMISSIONS_LOG=1`. Off by default, so nothing is written. */
+function loggingEnabled(): boolean {
+  const value = process.env.PI_PERMISSIONS_LOG;
+  return value === "1" || value === "true";
+}
+
+/** Truncate instead of growing without bound over a long session. */
+const LOG_MAX_BYTES = 1 << 20;
 
 /** `<agent-dir>/permissions.log`, resolved lazily so tests can redirect it. */
 export function logPath(): string {
@@ -28,15 +33,23 @@ function stringify(value: unknown): string {
 }
 
 /**
- * Append one timestamped line to the permission log. Best effort: a failure to
- * write must never change a permission decision.
+ * Append one timestamped line to the permission log. Off unless
+ * `PI_PERMISSIONS_LOG` is set. Callers log decisions and metadata, never the
+ * arguments a call carries, so commands and file bodies stay out of the file.
+ * Best effort: a failure to write must never change a permission decision.
  */
 export function log(message: string, details?: unknown): void {
-  if (!LOG_ENABLED) return;
+  if (!loggingEnabled()) return;
   const suffix = details === undefined ? "" : ` ${stringify(details)}`;
   const line = `[${new Date().toISOString()}] ${message}${suffix}\n`;
+  const file = logPath();
   try {
-    appendFileSync(logPath(), line);
+    if (statSync(file).size > LOG_MAX_BYTES) writeFileSync(file, "");
+  } catch {
+    // No file yet, or the stat raced a write; append creates it.
+  }
+  try {
+    appendFileSync(file, line);
   } catch {
     // Ignore logging errors.
   }

@@ -131,11 +131,11 @@ export default function permissionsExtension(pi: ExtensionAPI): void {
     requests: readonly PermissionRequest[],
     ctx: ExtensionContext,
   ): Promise<{ blocked: boolean; reason?: string }> => {
-    log("runRequests", requests);
+    log("runRequests", { count: requests.length, permissions: [...new Set(requests.map((r) => r.permission))] });
     const asks: PermissionRequest[] = [];
     for (const request of requests) {
       const decision = decide(request, ctx);
-      log("decision", { permission: request.permission, patterns: request.patterns, decision });
+      log("decision", { permission: request.permission, decision });
       if (decision === "allow") continue;
       if (decision === "deny") {
         return { blocked: true, reason: `Blocked by permissions: ${request.display}` };
@@ -163,7 +163,7 @@ export default function permissionsExtension(pi: ExtensionAPI): void {
       repeatCount = 1;
     }
     if (repeatCount < DOOM_THRESHOLD) return undefined;
-    log("doom_loop", { tool: event.toolName, input: event.input });
+    log("doom_loop", { tool: event.toolName, repeatCount });
     return {
       permission: "doom_loop",
       patterns: ["*"],
@@ -385,7 +385,7 @@ function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionReque
   const input = event.input as unknown as Record<string, unknown>;
   const external: PermissionRequest[] = [];
 
-  log("requestsForToolCall", event)
+  log("requestsForToolCall", { tool: event.toolName, toolCallId: event.toolCallId });
 
   if (event.toolName === "bash" || event.toolName === "powershell") {
     const command = typeof input.command === "string" ? input.command : "";
