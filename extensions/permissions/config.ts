@@ -47,8 +47,10 @@ export function canonicalPermission(key: string): Permission {
  *
  * Everything allows. `doom_loop` and `external_directory` ask. Reading a
  * `.env` file is denied while `.env.example` stays readable. Editing inside
- * `.git` or `.ssh` is denied. The defaults merge with user rules, so any of
- * them can be overridden by writing a later rule for the same scope.
+ * `.git` or `.ssh` is denied. The `read` rules apply wherever a path is
+ * touched, including paths named by a bash command or a grep, so `cat .env`
+ * hits the same deny as the read tool. The defaults merge with user rules, so
+ * any of them can be overridden by writing a later rule for the same scope.
  */
 export const BUILTIN_RULES: readonly PermissionRule[] = [
   { permission: "*", pattern: "*", action: "allow" },

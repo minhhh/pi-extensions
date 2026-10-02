@@ -313,11 +313,34 @@ export function addExternalFolder(requests: PermissionRequest[], abs: string, cw
   });
 }
 
-function bashRequests(segments: readonly BashSegment[], cwd: string): PermissionRequest[] {
+/**
+ * A `read` request for a path another tool touches. The `read` rules carry the
+ * `.env` protections, so evaluating a bash or grep path here is what stops
+ * `cat .env` from slipping past a rule written for the read tool. A limit
+ * remains: a grep with no explicit path searches the tree itself, so only the
+ * grep tool's own ignore rules keep it out of a `.env` sitting in the cwd.
+ */
+function readRequest(abs: string, display: string): PermissionRequest {
+  return {
+    permission: "read",
+    patterns: pathPatterns(abs),
+    always: [],
+    display,
+  };
+}
+
+export function bashRequests(segments: readonly BashSegment[], cwd: string): PermissionRequest[] {
   const external: PermissionRequest[] = [];
+  const reads: PermissionRequest[] = [];
   const requests: PermissionRequest[] = [];
+  const seen = new Set<string>();
   for (const segment of segments) {
-    for (const path of segment.paths) addExternalFolder(external, path, cwd);
+    for (const path of segment.paths) {
+      addExternalFolder(external, path, cwd);
+      if (seen.has(path)) continue;
+      seen.add(path);
+      reads.push(readRequest(path, `  ← Read ${path}`));
+    }
   }
   for (const segment of matchableSegments(segments)) {
     requests.push({
@@ -327,7 +350,7 @@ function bashRequests(segments: readonly BashSegment[], cwd: string): Permission
       display: segment.display,
     });
   }
-  return [...mergeExternal(external), ...requests];
+  return [...mergeExternal(external), ...reads, ...requests];
 }
 
 function folderFor(abs: string): string {
@@ -391,10 +414,16 @@ function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionReque
     case "grep":
     case "find": {
       const pattern = typeof input.pattern === "string" ? input.pattern : "*";
-      if (rawPath) addExternalFolder(external, resolveUserPath(rawPath, cwd), cwd);
       const permission = event.toolName === "grep" ? "grep" : "glob";
+      const reads: PermissionRequest[] = [];
+      if (rawPath) {
+        const abs = resolveUserPath(rawPath, cwd);
+        addExternalFolder(external, abs, cwd);
+        reads.push(readRequest(abs, `  ← Read ${rawPath}`));
+      }
       return [
         ...external,
+        ...reads,
         { permission, patterns: [pattern], always: [sessionAlways("*")], display: `${event.toolName} ${pattern}` },
       ];
     }
