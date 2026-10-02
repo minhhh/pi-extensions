@@ -125,8 +125,13 @@ function readConfigFile(file: string, warnings: string[]): PermissionRule[] | un
   let raw: string;
   try {
     raw = fs.readFileSync(file, "utf8");
-  } catch {
-    return undefined;
+  } catch (error) {
+    // An absent file is normal: the user simply has no config there. Any other
+    // failure (unreadable, a directory in the way) leaves the policy unknown,
+    // so throw and let the gate block rather than silently drop the rules.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`permissions: cannot read ${file}: ${reason}`, { cause: error });
   }
 
   let parsed: unknown;
