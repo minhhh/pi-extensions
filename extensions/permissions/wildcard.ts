@@ -19,6 +19,7 @@
  * of a folder is not a useful policy: a deny on a child is written explicitly.
  */
 
+import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -77,9 +78,37 @@ export function pathPatterns(abs: string, home = os.homedir()): string[] {
   return out;
 }
 
-/** True when a resolved path sits outside the working directory. */
+/**
+ * Resolve symlinks in a path. Follows to the nearest existing ancestor when
+ * part of the path does not exist yet, so a file about to be created still
+ * resolves through symlinked parents. Returns the lexical path when nothing
+ * along it exists.
+ */
+export function canonicalize(target: string): string {
+  const lexical = path.resolve(target);
+  let current = lexical;
+  const tail: string[] = [];
+
+  for (;;) {
+    try {
+      const real = fs.realpathSync(current);
+      return tail.length === 0 ? real : path.join(real, ...tail.reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return lexical;
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * True when a path sits outside the working directory. Both sides are
+ * canonicalized first, so a symlink inside the tree that points outside it is
+ * caught instead of passing as a lexical child.
+ */
 export function isExternal(abs: string, cwd: string): boolean {
-  const rel = path.relative(cwd, abs);
+  const rel = path.relative(canonicalize(cwd), canonicalize(abs));
   return rel.startsWith("..") || path.isAbsolute(rel);
 }
 

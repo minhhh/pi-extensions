@@ -16,7 +16,7 @@ import { analyzeBash } from "./bash.ts";
 import { mergeExternal } from "./requests.ts";
 import type { PermissionRequest } from "./types.ts";
 import { sessionAlways } from "./types.ts";
-import { isExternal, pathPatterns } from "./wildcard.ts";
+import { canonicalize, isExternal, pathPatterns } from "./wildcard.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-bash-"));
 const work = path.join(tmp, "work");
@@ -39,7 +39,7 @@ function externalFolders(command: string, cwd: string): string[] {
   const folders = new Set<string>();
   for (const segment of analyzeBash(command, cwd)) {
     for (const touched of segment.paths) {
-      if (isExternal(touched, cwd)) folders.add(folderFor(touched));
+      if (isExternal(touched, cwd)) folders.add(folderFor(canonicalize(touched)));
     }
   }
   const requests: PermissionRequest[] = [...folders].map((folder) => ({
@@ -57,11 +57,11 @@ test("cd then relative reads asks for the cd tree, not root", () => {
     'echo "==="',
     "sed -n '/custom<T>/,/;/p' extensions/types.ts",
   ].join("; ");
-  assert.deepEqual(externalFolders(command, work), [project]);
+  assert.deepEqual(externalFolders(command, work), [canonicalize(project)]);
 });
 
 test("the sed address alone never asks for the filesystem root", () => {
   // `T>/,/` is a redirection candidate only because the scan ignores quotes.
   const command = `sed -n '/custom<T>/,/;/p' ${project}/extensions/types.ts`;
-  assert.deepEqual(externalFolders(command, work), [path.join(project, "extensions")]);
+  assert.deepEqual(externalFolders(command, work), [canonicalize(path.join(project, "extensions"))]);
 });

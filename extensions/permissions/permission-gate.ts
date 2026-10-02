@@ -29,7 +29,7 @@ import { buildMenu, describeRules } from "./grants.ts";
 import { describeRule, resolveRequest, rulesForPermission } from "./rules.ts";
 import { sessionAlways, type Decision, type LoadedConfig, type PermissionRequest, type PermissionRule, type RulePermission } from "./types.ts";
 import { log, logPath, template } from "./utils.ts";
-import { isExternal, pathPatterns } from "./wildcard.ts";
+import { canonicalize, isExternal, pathPatterns } from "./wildcard.ts";
 import { coalesceAsks, mergeExternal } from "./requests.ts";
 
 const AUTO_FLAG = "auto";
@@ -296,9 +296,15 @@ function patternLine(request: PermissionRequest): string {
     .join("\n");
 }
 
-function addExternalFolder(requests: PermissionRequest[], abs: string, display: string, cwd: string): void {
+/**
+ * Add an `external_directory` request for a touched path, or nothing when it
+ * sits inside the cwd. Patterns use the canonical absolute folder, with
+ * symlinks resolved, so a grant names the real location instead of a link to
+ * it and never a relative path.
+ */
+export function addExternalFolder(requests: PermissionRequest[], abs: string, cwd: string): void {
   if (!isExternal(abs, cwd)) return;
-  const folder = folderFor(abs);
+  const folder = folderFor(canonicalize(abs));
   requests.push({
     permission: "external_directory",
     patterns: pathPatterns(folder),
@@ -311,7 +317,7 @@ function bashRequests(segments: readonly BashSegment[], cwd: string): Permission
   const external: PermissionRequest[] = [];
   const requests: PermissionRequest[] = [];
   for (const segment of segments) {
-    for (const path of segment.paths) addExternalFolder(external, path, path, cwd);
+    for (const path of segment.paths) addExternalFolder(external, path, cwd);
   }
   for (const segment of matchableSegments(segments)) {
     requests.push({
@@ -335,7 +341,7 @@ function folderFor(abs: string): string {
 
 function pathRequest(permission: string, name: string, raw: string, cwd: string, external: PermissionRequest[]): PermissionRequest {
   const abs = resolveUserPath(raw, cwd);
-  addExternalFolder(external, abs, raw, cwd);
+  addExternalFolder(external, abs, cwd);
   return { permission, patterns: pathPatterns(abs), always: [sessionAlways("*")], display: `${name} ${raw}` };
 }
 
@@ -385,7 +391,7 @@ function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionReque
     case "grep":
     case "find": {
       const pattern = typeof input.pattern === "string" ? input.pattern : "*";
-      if (rawPath) addExternalFolder(external, resolveUserPath(rawPath, cwd), rawPath, cwd);
+      if (rawPath) addExternalFolder(external, resolveUserPath(rawPath, cwd), cwd);
       const permission = event.toolName === "grep" ? "grep" : "glob";
       return [
         ...external,
@@ -402,8 +408,8 @@ function generic(event: ToolCallEvent, input: Record<string, unknown>, cwd: stri
   const resource = resourceField(input) ?? "*";
   const external: PermissionRequest[] = [];
 
-  if (typeof input.path === "string") addExternalFolder(external, resolveUserPath(input.path, cwd), input.path, cwd);
-  if (typeof input.filePath === "string") addExternalFolder(external, resolveUserPath(input.filePath, cwd), input.filePath, cwd);
+  if (typeof input.path === "string") addExternalFolder(external, resolveUserPath(input.path, cwd), cwd);
+  if (typeof input.filePath === "string") addExternalFolder(external, resolveUserPath(input.filePath, cwd), cwd);
 
   return [
     { permission, patterns: [resource], always: [sessionAlways("*")], display: `${event.toolName} ${resource}` },
