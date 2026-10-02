@@ -12,8 +12,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test, { after } from "node:test";
-import { addExternalFolder } from "./permission-gate.ts";
-import type { PermissionRequest } from "./types.ts";
+import { addExternalFolder, grantsFromEntries } from "./permission-gate.ts";
+import type { PermissionRequest, PermissionRule } from "./types.ts";
 import { canonicalize } from "./wildcard.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-gate-"));
@@ -85,4 +85,44 @@ test("a path that does not exist yet still resolves through a symlinked parent",
 
   assert.equal(requests.length, 1);
   assert.deepEqual(requests[0]!.patterns, [canonicalize(outside)]);
+});
+
+function grant(data: unknown): unknown {
+  return { type: "custom", customType: "permissions-rule", data };
+}
+
+const allowBash: PermissionRule = { permission: "bash", pattern: "git push *", action: "allow" };
+
+test("session grants are reconstructed in order", () => {
+  const second: PermissionRule = { permission: "read", pattern: "*", action: "allow" };
+  assert.deepEqual(grantsFromEntries([grant(allowBash), grant(second)]), [allowBash, second]);
+});
+
+test("a clear entry resets the grants before it", () => {
+  const afterClear: PermissionRule = { permission: "edit", pattern: "*", action: "allow" };
+  assert.deepEqual(grantsFromEntries([grant(allowBash), { type: "custom", customType: "permissions-clear" }, grant(afterClear)]), [
+    afterClear,
+  ]);
+});
+
+test("a malformed grant payload is ignored, not trusted", () => {
+  const entries = [
+    grant({ permission: "bash", pattern: "git push *", action: "maybe" }),
+    grant({ permission: "bash", pattern: 42, action: "allow" }),
+    grant({ permission: "bash", action: "allow" }),
+    grant("bash * allow"),
+    grant(null),
+  ];
+  assert.deepEqual(grantsFromEntries(entries), []);
+});
+
+test("non-custom and non-grant entries are skipped", () => {
+  const entries = [
+    { type: "message", role: "user", content: "hi" },
+    null,
+    "nope",
+    { type: "custom", customType: "something-else", data: allowBash },
+    grant(allowBash),
+  ];
+  assert.deepEqual(grantsFromEntries(entries), [allowBash]);
 });

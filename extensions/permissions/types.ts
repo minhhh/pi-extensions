@@ -12,6 +12,10 @@ export type Decision = "allow" | "ask" | "deny";
 /** Higher wins when two decisions compete. Used for tighten-only merges. */
 export const DECISION_RANK: Record<Decision, number> = { allow: 0, ask: 1, deny: 2 };
 
+export function isDecision(value: unknown): value is Decision {
+  return value === "allow" || value === "ask" || value === "deny";
+}
+
 /**
  * Permission keys the policy engine evaluates. The known set covers built-in
  * tools and the two synthetic gates; the `(string & {})` widening keeps custom
@@ -42,6 +46,16 @@ export interface PermissionRule {
   permission: RulePermission;
   pattern: string;
   action: Decision;
+}
+
+/**
+ * Shape check for a rule from a source the compiler cannot vouch for, such as a
+ * session entry. Anything that fails is ignored rather than trusted.
+ */
+export function isPermissionRule(value: unknown): value is PermissionRule {
+  if (!value || typeof value !== "object") return false;
+  const rule = value as Record<string, unknown>;
+  return typeof rule.permission === "string" && typeof rule.pattern === "string" && isDecision(rule.action);
 }
 
 /**

@@ -27,7 +27,7 @@ import { analyzeBash, matchableSegments, resolveUserPath, type BashSegment } fro
 import { canonicalPermission, loadConfig } from "./config.ts";
 import { buildMenu, describeRules } from "./grants.ts";
 import { describeRule, resolveRequest, rulesForPermission } from "./rules.ts";
-import { sessionAlways, type Decision, type LoadedConfig, type PermissionRequest, type PermissionRule, type RulePermission } from "./types.ts";
+import { isPermissionRule, sessionAlways, type Decision, type LoadedConfig, type PermissionRequest, type PermissionRule, type RulePermission } from "./types.ts";
 import { log, logPath, template } from "./utils.ts";
 import { canonicalize, isExternal, pathPatterns } from "./wildcard.ts";
 import { coalesceAsks, mergeExternal } from "./requests.ts";
@@ -75,16 +75,7 @@ export default function permissionsExtension(pi: ExtensionAPI): void {
   };
 
   const reconstruct = (ctx: ExtensionContext): void => {
-    approved = [];
-    for (const entry of ctx.sessionManager.getBranch()) {
-      if (entry.type !== "custom") continue;
-      const custom = entry as { customType?: string; data?: unknown };
-      if (custom.customType === CLEAR_ENTRY) {
-        approved = [];
-        continue;
-      }
-      if (custom.customType === GRANT_ENTRY) approved.push(custom.data as PermissionRule);
-    }
+    approved = grantsFromEntries(ctx.sessionManager.getBranch());
   };
 
   /** Prompt with Pi's outcomes: once, one choice per always option, reject. */
@@ -239,6 +230,26 @@ export default function permissionsExtension(pi: ExtensionAPI): void {
     repeatCount = 0;
   });
   pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));
+}
+
+/**
+ * Rules a session branch grants, in order. A `permissions-clear` entry resets
+ * the list. An entry whose payload is not a rule is ignored rather than
+ * trusted, so a hand-edited session file cannot inject a grant.
+ */
+export function grantsFromEntries(entries: readonly unknown[]): PermissionRule[] {
+  const rules: PermissionRule[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const custom = entry as { type?: string; customType?: string; data?: unknown };
+    if (custom.type !== "custom") continue;
+    if (custom.customType === CLEAR_ENTRY) {
+      rules.length = 0;
+      continue;
+    }
+    if (custom.customType === GRANT_ENTRY && isPermissionRule(custom.data)) rules.push(custom.data);
+  }
+  return rules;
 }
 
 function blocked(output: string): { output: string; exitCode: number; cancelled: boolean; truncated: boolean } {

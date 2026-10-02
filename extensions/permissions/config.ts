@@ -19,7 +19,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { Decision, LoadedConfig, Permission, PermissionRule } from "./types.ts";
+import { isDecision, type Decision, type LoadedConfig, type Permission, type PermissionRule } from "./types.ts";
 import { expandHome } from "./wildcard.ts";
 
 export const CONFIG_FILENAME = "permissions.json";
@@ -80,10 +80,6 @@ export const BUILTIN_RULES: readonly PermissionRule[] = [
 ];
 
 type PermissionValue = Decision | Record<string, Decision | Record<string, Decision>>;
-
-function isDecision(value: unknown): value is Decision {
-  return value === "allow" || value === "ask" || value === "deny";
-}
 
 /**
  * Turn a permission value into an ordered rule list. Key order and pattern
