@@ -45,20 +45,22 @@ function mergeRequests(requests: readonly PermissionRequest[]): PermissionReques
 }
 
 /**
- * Union the always choices of coalesced requests, keeping first-seen order so
- * the narrow choice stays ahead of the broad one. Duplicate choices collapse by
- * their patterns.
+ * Gather the always patterns of coalesced requests into one option. Every
+ * command on a compound line shares a single prompt, so it also shares a single
+ * "always" entry whose patterns cover the whole line. First-seen order is kept
+ * and duplicate patterns collapse.
  */
 function mergeAlways(requests: readonly PermissionRequest[]): AlwaysOption[] {
   const seen = new Set<string>();
-  const merged: AlwaysOption[] = [];
+  const patterns: string[] = [];
   for (const request of requests) {
     for (const option of request.always) {
-      const key = option.patterns.join("\u0000");
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      merged.push(option);
+      for (const pattern of option.patterns) {
+        if (!pattern || seen.has(pattern)) continue;
+        seen.add(pattern);
+        patterns.push(pattern);
+      }
     }
   }
-  return merged;
+  return patterns.length > 0 ? [{ patterns }] : [];
 }

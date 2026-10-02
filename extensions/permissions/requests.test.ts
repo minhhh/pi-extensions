@@ -16,8 +16,19 @@ test("coalesceAsks merges same-permission asks into one prompt", () => {
 
   assert.equal(merged.length, 1);
   assert.deepEqual(merged[0]!.patterns, ["touch 1", "touch", "cat 1", "cat"]);
-  assert.deepEqual(merged[0]!.always, [sessionAlways("touch *"), sessionAlways("cat *")]);
+  // A compound line still offers one "always" entry; its patterns cover every
+  // command rather than making the user pick one command to allow.
+  assert.deepEqual(merged[0]!.always, [sessionAlways("touch *", "cat *")]);
   assert.equal(merged[0]!.display, "$ touch 1\n$ cat 1");
+});
+
+test("coalesceAsks collapses duplicate always patterns into one option", () => {
+  const first = request({ display: "$ git status", always: [sessionAlways("git *", "git status *")] });
+  const second = request({ display: "$ git log", always: [sessionAlways("git *")] });
+
+  const merged = coalesceAsks([first, second]);
+
+  assert.deepEqual(merged[0]!.always, [sessionAlways("git *", "git status *")]);
 });
 
 test("coalesceAsks keeps different permissions apart", () => {

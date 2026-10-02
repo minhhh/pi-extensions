@@ -195,10 +195,11 @@ The prompt offers these outcomes:
 
 - `Allow once` runs just this request
 - `Allow always` approves one choice's patterns for the rest of the session. A
-  request can offer several always choices, narrow first and broad after. Shell
-  commands suggest a durable prefix such as `git status *`. Other tools suggest
-  `*`, shown in the prompt as `<tool> *`. Picking one asks once more with the
-  exact rules before granting them.
+  request can offer several always choices, narrow first and broad after, and a
+  compound shell line offers a single choice whose patterns cover every command
+  on it. Shell commands suggest a durable prefix such as `git status *`. Other
+  tools suggest `*`, shown in the prompt as `<tool> *`. Picking one asks once
+  more with the exact rules before granting them.
 - `Deny` blocks the request
 
 Requests are collapsed before prompting. Nested external folders reduce to the
