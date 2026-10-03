@@ -22,7 +22,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType, type ExtensionAPI, type ExtensionContext, type ToolCallEvent } from "@earendil-works/pi-coding-agent";
 import { analyzeBash, matchableSegments, resolveUserPath, type BashSegment } from "./bash.ts";
 import { canonicalPermission, loadConfig } from "./config.ts";
 import { buildMenu, describeRules } from "./grants.ts";
@@ -393,54 +393,50 @@ function resourceField(input: Record<string, unknown>): string | undefined {
  * and the most restrictive result wins.
  */
 function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionRequest[] {
-  const input = event.input as unknown as Record<string, unknown>;
   const external: PermissionRequest[] = [];
 
   log("requestsForToolCall", { tool: event.toolName, toolCallId: event.toolCallId });
 
-  if (event.toolName === "bash" || event.toolName === "powershell") {
-    const command = typeof input.command === "string" ? input.command : "";
-    return bashRequests(analyzeBash(command, cwd), cwd);
+  // Narrow with the SDK guard, not `on event.toolName`. The guard narrows
+  // `event.input` to each tool's schema, so a renamed field is a compile error
+  // instead of a silent fall-through to `generic` with an undefined resource.
+  if (isToolCallEventType("bash", event) || isToolCallEventType("powershell", event)) {
+    return bashRequests(analyzeBash(event.input.command, cwd), cwd);
   }
 
-  const rawPath = typeof input.path === "string" ? input.path : typeof input.filePath === "string" ? input.filePath : undefined;
-
-  switch (event.toolName) {
-    case "read": {
-      if (!rawPath) return generic(event, input, cwd);
-      const request = pathRequest("read", "read", rawPath, cwd, external);
-      return [...external, request];
-    }
-    case "write":
-    case "edit": {
-      if (!rawPath) return generic(event, input, cwd);
-      const request = pathRequest("edit", event.toolName, rawPath, cwd, external);
-      return [...external, request];
-    }
-    case "ls": {
-      if (!rawPath) return generic(event, input, cwd);
-      const request = pathRequest("list", "ls", rawPath, cwd, external);
-      return [...external, request];
-    }
-    case "grep":
-    case "find": {
-      const pattern = typeof input.pattern === "string" ? input.pattern : "*";
-      const permission = event.toolName === "grep" ? "grep" : "glob";
-      const reads: PermissionRequest[] = [];
-      if (rawPath) {
-        const abs = resolveUserPath(rawPath, cwd);
-        addExternalFolder(external, abs, cwd);
-        reads.push(readRequest(abs, `  ← Read ${rawPath}`));
-      }
-      return [
-        ...external,
-        ...reads,
-        { permission, patterns: [pattern], always: [sessionAlways("*")], display: `${event.toolName} ${pattern}` },
-      ];
-    }
-    default:
-      return generic(event, input, cwd);
+  if (isToolCallEventType("read", event)) {
+    const rawPath = event.input.path;
+    if (!rawPath) return generic(event, event.input, cwd);
+    return [...external, pathRequest("read", "read", rawPath, cwd, external)];
   }
+
+  if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
+    const rawPath = event.input.path;
+    if (!rawPath) return generic(event, event.input, cwd);
+    return [...external, pathRequest("edit", event.toolName, rawPath, cwd, external)];
+  }
+
+  if (isToolCallEventType("ls", event)) {
+    const rawPath = event.input.path;
+    if (!rawPath) return generic(event, event.input, cwd);
+    return [...external, pathRequest("list", "ls", rawPath, cwd, external)];
+  }
+
+  if (isToolCallEventType("grep", event) || isToolCallEventType("find", event)) {
+    const { pattern, path: rawPath } = event.input;
+    const permission = event.toolName === "grep" ? "grep" : "glob";
+    if (rawPath) {
+      const abs = resolveUserPath(rawPath, cwd);
+      addExternalFolder(external, abs, cwd);
+      external.push(readRequest(abs, `  ← Read ${rawPath}`));
+    }
+    return [
+      ...external,
+      { permission, patterns: [pattern], always: [sessionAlways("*")], display: `${event.toolName} ${pattern}` },
+    ];
+  }
+
+  return generic(event, event.input, cwd);
 }
 
 function generic(event: ToolCallEvent, input: Record<string, unknown>, cwd: string): PermissionRequest[] {

@@ -25,6 +25,30 @@ import * as path from "node:path";
 
 const cache = new Map<string, RegExp>();
 
+/**
+ * Whether the filesystem folds case. On a case-insensitive volume `.ENV` reads
+ * the file `.env`, so a case-sensitive regex lets a deny on `*.env` be walked
+ * past by `cat .ENV`. Probe once by resolving the running executable through a
+ * case-flipped name: it succeeds only when the volume ignores case.
+ */
+function detectCaseInsensitiveFs(): boolean {
+  if (process.platform === "win32") return true;
+  const sample = process.execPath;
+  const base = path.basename(sample);
+  const flipped = base.replace(/[a-z]/i, (ch) => (ch === ch.toLowerCase() ? ch.toUpperCase() : ch.toLowerCase()));
+  if (flipped === base) return false;
+  try {
+    // `realpathSync` keeps the case it is given (it does not report the
+    // on-disk name), so the signal is whether the flipped name exists at all.
+    fs.statSync(path.join(path.dirname(sample), flipped));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const CASE_INSENSITIVE = detectCaseInsensitiveFs();
+
 function compile(pattern: string): RegExp {
   const cached = cache.get(pattern);
   if (cached) return cached;
@@ -43,7 +67,7 @@ function compile(pattern: string): RegExp {
     escaped = escaped.replace(/\/\.\*$/, "(/.*)?");
   }
 
-  const re = new RegExp(`^${escaped}$`, process.platform === "win32" ? "si" : "s");
+  const re = new RegExp(`^${escaped}$`, CASE_INSENSITIVE ? "si" : "s");
   cache.set(pattern, re);
   return re;
 }

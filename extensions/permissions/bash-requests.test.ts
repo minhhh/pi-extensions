@@ -90,3 +90,21 @@ test("a symlink to .env is denied through the read permission", (t) => {
   assert.equal(readDecision("cat env-link"), "deny");
   assert.equal(readDecision(`cat ${link}`), "deny");
 });
+
+test("a case variant of .env is denied on a case-insensitive filesystem", (t) => {
+  // On APFS and NTFS, `.ENV` reads `.env`. A case-sensitive matcher lets that
+  // walk past the deny, so the matcher folds case on those volumes.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-case-"));
+  try {
+    fs.writeFileSync(path.join(dir, ".env"), "SECRET=1");
+    if (!fs.existsSync(path.join(dir, ".ENV"))) {
+      t.skip("filesystem is case-sensitive");
+      return;
+    }
+    const request = bashRequests(analyzeBash("cat .ENV", dir), dir).find((entry) => entry.permission === "read");
+    assert.ok(request, "expected a read request");
+    assert.equal(resolveRequest(config(), request, []), "deny");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
