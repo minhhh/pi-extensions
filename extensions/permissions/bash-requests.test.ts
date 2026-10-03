@@ -72,3 +72,21 @@ test("paths are not evaluated under read when the tool filters them out", () => 
   // `ls` has no path operand here, so no read request is produced.
   assert.equal(decisions("ls -la").some((entry) => entry.permission === "read"), false);
 });
+
+test("a symlink to .env is denied through the read permission", (t) => {
+  // The deny is written against `.env`, so matching only the lexical name lets
+  // `cat env-link` walk past it. The resolved spelling has to be tried too.
+  const dotenv = path.join(cwd, ".env");
+  const link = path.join(cwd, "env-link");
+  fs.writeFileSync(dotenv, "SECRET=1");
+  fs.rmSync(link, { force: true });
+  try {
+    fs.symlinkSync(dotenv, link);
+  } catch {
+    t.skip("symlinks unavailable on this platform");
+    return;
+  }
+
+  assert.equal(readDecision("cat env-link"), "deny");
+  assert.equal(readDecision(`cat ${link}`), "deny");
+});

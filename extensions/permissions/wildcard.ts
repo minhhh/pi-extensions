@@ -68,14 +68,26 @@ export function expandHome(pattern: string, home = os.homedir()): string {
  * Spellings of one resolved path, tried in order. An absolute config pattern
  * hits the absolute form, and `~/...` hits the home form. The `~/...` form is
  * only added when the path sits under the home directory.
+ *
+ * The canonical (symlink-resolved) form is added too when it differs. A rule is
+ * written against the real target, so matching only the lexical name lets
+ * `cat link` walk past a deny on `link -> .env`. Both spellings stay, so a rule
+ * written against either name still matches.
  */
 export function pathPatterns(abs: string, home = os.homedir()): string[] {
-  const out = [abs];
-  const homeRel = path.relative(home, abs);
-  if (homeRel && !homeRel.startsWith("..") && !path.isAbsolute(homeRel)) {
-    out.push(`~/${homeRel}`);
+  const spellings = [abs];
+  const real = canonicalize(abs);
+  if (real !== abs) spellings.push(real);
+
+  const out: string[] = [];
+  for (const candidate of spellings) {
+    out.push(candidate);
+    const homeRel = path.relative(home, candidate);
+    if (homeRel && !homeRel.startsWith("..") && !path.isAbsolute(homeRel)) {
+      out.push(`~/${homeRel}`);
+    }
   }
-  return out;
+  return [...new Set(out)];
 }
 
 /**

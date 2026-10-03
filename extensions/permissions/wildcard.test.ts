@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test, { after } from "node:test";
-import { canonicalize, collapseFolders, expandHome, isExternal, wildcardMatch } from "./wildcard.ts";
+import { canonicalize, collapseFolders, expandHome, isExternal, pathPatterns, wildcardMatch } from "./wildcard.ts";
 
 test("collapseFolders keeps only the outermost folder", () => {
   const folders = [
@@ -111,4 +111,19 @@ test("canonicalize resolves through a symlinked parent for a missing leaf", (t) 
     return;
   }
   assert.equal(canonicalize(path.join(dirLink, "not-created-yet.txt")), path.join(fs.realpathSync(outside), "not-created-yet.txt"));
+});
+
+test("pathPatterns adds the symlink-resolved spelling", (t) => {
+  if (!symlinksAvailable) {
+    t.skip("symlinks unavailable on this platform");
+    return;
+  }
+  // A rule written against the real target has to match a request that names
+  // the link, otherwise a deny on `.env` is bypassed by `cat link`.
+  const patterns = pathPatterns(fileLink);
+  assert.ok(patterns.includes(fileLink), `expected lexical form in ${JSON.stringify(patterns)}`);
+  assert.ok(
+    patterns.includes(fs.realpathSync(path.join(outside, "secret.txt"))),
+    `expected resolved form in ${JSON.stringify(patterns)}`,
+  );
 });
