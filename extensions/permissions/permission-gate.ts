@@ -388,6 +388,15 @@ function resourceField(input: Record<string, unknown>): string | undefined {
 }
 
 /**
+ * Read a string field off a tool input. The schema types it as a string, but a
+ * sibling `tool_call` handler can mutate `event.input` in place and the SDK
+ * does not re-validate, so the runtime shape is not guaranteed by the type.
+ */
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+/**
  * Map a tool call to the requests the policy engine evaluates. A bash call can
  * produce several requests, one per segment plus the external directory gate,
  * and the most restrictive result wins.
@@ -397,33 +406,35 @@ function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionReque
 
   log("requestsForToolCall", { tool: event.toolName, toolCallId: event.toolCallId });
 
-  // Narrow with the SDK guard, not `on event.toolName`. The guard narrows
-  // `event.input` to each tool's schema, so a renamed field is a compile error
-  // instead of a silent fall-through to `generic` with an undefined resource.
+  // Narrow with the SDK guard, not a `switch` on `event.toolName`. The guard
+  // narrows `event.input` to each tool's schema, so a renamed field is a
+  // compile error instead of a silent fall-through to `generic` with an
+  // undefined resource.
   if (isToolCallEventType("bash", event) || isToolCallEventType("powershell", event)) {
-    return bashRequests(analyzeBash(event.input.command, cwd), cwd);
+    return bashRequests(analyzeBash(stringField(event.input.command) ?? "", cwd), cwd);
   }
 
   if (isToolCallEventType("read", event)) {
-    const rawPath = event.input.path;
+    const rawPath = stringField(event.input.path);
     if (!rawPath) return generic(event, event.input, cwd);
     return [...external, pathRequest("read", "read", rawPath, cwd, external)];
   }
 
   if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
-    const rawPath = event.input.path;
+    const rawPath = stringField(event.input.path);
     if (!rawPath) return generic(event, event.input, cwd);
     return [...external, pathRequest("edit", event.toolName, rawPath, cwd, external)];
   }
 
   if (isToolCallEventType("ls", event)) {
-    const rawPath = event.input.path;
+    const rawPath = stringField(event.input.path);
     if (!rawPath) return generic(event, event.input, cwd);
     return [...external, pathRequest("list", "ls", rawPath, cwd, external)];
   }
 
   if (isToolCallEventType("grep", event) || isToolCallEventType("find", event)) {
-    const { pattern, path: rawPath } = event.input;
+    const pattern = stringField(event.input.pattern) ?? "*";
+    const rawPath = stringField(event.input.path);
     const permission = event.toolName === "grep" ? "grep" : "glob";
     if (rawPath) {
       const abs = resolveUserPath(rawPath, cwd);
