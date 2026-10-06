@@ -401,7 +401,7 @@ function stringField(value: unknown): string | undefined {
  * produce several requests, one per segment plus the external directory gate,
  * and the most restrictive result wins.
  */
-function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionRequest[] {
+export function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionRequest[] {
   const external: PermissionRequest[] = [];
 
   log("requestsForToolCall", { tool: event.toolName, toolCallId: event.toolCallId });
@@ -417,19 +417,22 @@ function requestsForToolCall(event: ToolCallEvent, cwd: string): PermissionReque
   if (isToolCallEventType("read", event)) {
     const rawPath = stringField(event.input.path);
     if (!rawPath) return generic(event, event.input, cwd);
-    return [...external, pathRequest("read", "read", rawPath, cwd, external)];
+    const request = pathRequest("read", "read", rawPath, cwd, external);
+    return [...mergeExternal(external), request];
   }
 
   if (isToolCallEventType("write", event) || isToolCallEventType("edit", event)) {
     const rawPath = stringField(event.input.path);
     if (!rawPath) return generic(event, event.input, cwd);
-    return [...external, pathRequest("edit", event.toolName, rawPath, cwd, external)];
+    const request = pathRequest("edit", event.toolName, rawPath, cwd, external);
+    return [...mergeExternal(external), request];
   }
 
   if (isToolCallEventType("ls", event)) {
     const rawPath = stringField(event.input.path);
     if (!rawPath) return generic(event, event.input, cwd);
-    return [...external, pathRequest("list", "ls", rawPath, cwd, external)];
+    const request = pathRequest("list", "ls", rawPath, cwd, external);
+    return [...mergeExternal(external), request];
   }
 
   if (isToolCallEventType("grep", event) || isToolCallEventType("find", event)) {
