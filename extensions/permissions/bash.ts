@@ -19,6 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { sessionAlways, type AlwaysOption } from "./types.ts";
+import { toNativePath } from "./wildcard.ts";
 
 const WRAPPERS = new Set([
   "sudo",
@@ -200,8 +201,8 @@ function basename(command: string): string {
 
 export function resolveUserPath(target: string, cwd: string): string {
   if (target === "~") return os.homedir();
-  if (target.startsWith("~/")) return path.resolve(os.homedir(), target.slice(2));
-  return path.resolve(cwd, target);
+  if (target.startsWith("~/")) return path.resolve(os.homedir(), toNativePath(target.slice(2)));
+  return path.resolve(toNativePath(cwd), toNativePath(target));
 }
 
 interface Heredoc {

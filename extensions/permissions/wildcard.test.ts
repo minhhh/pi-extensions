@@ -3,7 +3,29 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test, { after } from "node:test";
-import { canonicalize, collapseFolders, expandHome, isExternal, pathPatterns, wildcardMatch } from "./wildcard.ts";
+import { canonicalize, collapseFolders, expandHome, isExternal, pathPatterns, toNativePath, wildcardMatch } from "./wildcard.ts";
+
+const WINDOWS = process.platform === "win32";
+
+test("toNativePath maps a git-bash drive path to a Windows path", () => {
+  if (!WINDOWS) return;
+  assert.equal(toNativePath("/c/Users/alex/list"), "C:\\Users\\alex\\list");
+  assert.equal(toNativePath("/cygdrive/d/dev"), "D:\\dev");
+  assert.equal(toNativePath("/c"), "C:\\");
+});
+
+test("toNativePath leaves native and relative spellings alone", () => {
+  assert.equal(toNativePath("relative/file"), "relative/file");
+  assert.equal(toNativePath("C:\\Users\\alex"), "C:\\Users\\alex");
+  if (!WINDOWS) assert.equal(toNativePath("/c/Users/alex"), "/c/Users/alex");
+});
+
+test("canonicalize does not pin a drive-style path to the cwd drive", () => {
+  if (!WINDOWS) return;
+  const resolved = canonicalize("/c/permissions-probe-missing");
+  assert.ok(!resolved.includes("\\c\\"), `drive was doubled: ${resolved}`);
+  assert.equal(resolved.toLowerCase(), "c:\\permissions-probe-missing");
+});
 
 test("collapseFolders keeps only the outermost folder", () => {
   const folders = [

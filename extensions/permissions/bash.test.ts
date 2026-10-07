@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import * as path from "node:path";
 import test from "node:test";
-import { analyzeBash, matchableSegments, splitCommands, SUBSTITUTION_FAMILY } from "./bash.ts";
+import { analyzeBash, matchableSegments, resolveUserPath, splitCommands, SUBSTITUTION_FAMILY } from "./bash.ts";
 import { sessionAlways } from "./types.ts";
 import { collapseFolders } from "./wildcard.ts";
 
@@ -336,4 +337,14 @@ test("analyzeBash parses a for loop over repo slugs and a curl pipeline", () => 
 
   const curl = segments.find((segment) => segment.patterns.includes("curl"))!;
   assert.deepEqual(curl.patterns, ["curl -s https://api.github.com/repos/$r/license", "curl"]);
+});
+
+test("resolveUserPath keeps a relative operand under the cwd", () => {
+  const cwd = process.platform === "win32" ? "C:\\work" : "/work";
+  assert.equal(resolveUserPath("list/Scripts", cwd), path.resolve(cwd, "list/Scripts"));
+});
+
+test("resolveUserPath translates a git-bash drive path instead of doubling the drive", () => {
+  if (process.platform !== "win32") return;
+  assert.equal(resolveUserPath("/c/Users/alex/list", "C:\\Users\\alex"), "C:\\Users\\alex\\list");
 });

@@ -115,13 +115,32 @@ export function pathPatterns(abs: string, home = os.homedir()): string[] {
 }
 
 /**
+ * Translate a shell-flavored path into the native spelling before it is
+ * resolved.
+ *
+ * Git Bash, MSYS, and Cygwin name drives as `/c/Users/...` or
+ * `/cygdrive/c/Users/...`. On Windows `path.resolve` reads those as
+ * root-relative, anchors them to the drive of the process cwd, and hands back
+ * `C:\c\Users\...` — a path that exists nowhere and names the drive twice in
+ * a permission prompt. Every other platform, and every native or relative
+ * spelling, passes through unchanged.
+ */
+export function toNativePath(target: string): string {
+  if (process.platform !== "win32") return target;
+  const match = /^\/cygdrive\/([A-Za-z])(?:\/|$)/.exec(target) ?? /^\/([A-Za-z])(?:\/|$)/.exec(target);
+  if (!match) return target;
+  const rest = target.slice(match[0].length).replace(/\//g, "\\");
+  return `${match[1]!.toUpperCase()}:\\${rest}`;
+}
+
+/**
  * Resolve symlinks in a path. Follows to the nearest existing ancestor when
  * part of the path does not exist yet, so a file about to be created still
  * resolves through symlinked parents. Returns the lexical path when nothing
  * along it exists.
  */
 export function canonicalize(target: string): string {
-  const lexical = path.resolve(target);
+  const lexical = path.resolve(toNativePath(target));
   let current = lexical;
   const tail: string[] = [];
 
