@@ -69,13 +69,13 @@ export const BUILTIN_RULES: readonly PermissionRule[] = [
   { permission: "bash", pattern: "doas *", action: "ask" },
   { permission: "bash", pattern: "(subshell)", action: "ask" },
   { permission: "bash", pattern: "(indirect)", action: "ask" },
-  { permission: "edit", pattern: ".git", action: "deny" },
+  // Edits inside VCS and SSH metadata are denied. Both spellings are kept:
+  // request patterns are absolute, and `**/` compiles to `.*` plus a literal
+  // `/`, so `**/.git/*` cannot match a relative `.git`. The anchored form
+  // covers that, and the trailing `/*` already matches the directory itself.
   { permission: "edit", pattern: ".git/*", action: "deny" },
-  { permission: "edit", pattern: "**/.git", action: "deny" },
   { permission: "edit", pattern: "**/.git/*", action: "deny" },
-  { permission: "edit", pattern: ".ssh", action: "deny" },
   { permission: "edit", pattern: ".ssh/*", action: "deny" },
-  { permission: "edit", pattern: "**/.ssh", action: "deny" },
   { permission: "edit", pattern: "**/.ssh/*", action: "deny" },
 ];
 

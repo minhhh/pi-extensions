@@ -11,7 +11,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test, { after } from "node:test";
-import { loadConfig } from "./config.ts";
+import { BUILTIN_RULES, loadConfig } from "./config.ts";
+import { resolveOne } from "./rules.ts";
+import type { LoadedConfig } from "./types.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-config-"));
 const cwd = path.join(tmp, "cwd");
@@ -71,4 +73,29 @@ test("an unreadable config throws instead of dropping rules silently", () => {
   } finally {
     fs.rmSync(projectFile, { recursive: true, force: true });
   }
+});
+
+test("builtin edit denies cover .git and .ssh, absolute and relative", () => {
+  const config: LoadedConfig = {
+    defaultRules: [...BUILTIN_RULES],
+    userRules: [],
+    projectRules: [],
+    userPath: "",
+    projectPath: "",
+    warnings: [],
+  };
+  const edit = (pattern: string) => resolveOne(config, "edit", [pattern], []);
+
+  // Absolute spellings are what requests carry; the relative ones need the
+  // anchored `*/.git`-style rules, since `**/` requires a literal slash.
+  assert.equal(edit("/p/sub/.git"), "deny");
+  assert.equal(edit("/p/sub/.git/config"), "deny");
+  assert.equal(edit(".git/config"), "deny");
+  assert.equal(edit("/home/u/.ssh/id_ed25519"), "deny");
+  assert.equal(edit(".ssh/id_ed25519"), "deny");
+
+  // Neighbours with the same name prefix stay editable.
+  assert.equal(edit("/p/.github/workflows/ci.yml"), "allow");
+  assert.equal(edit("/p/.gitignore"), "allow");
+  assert.equal(edit("/p/.git2/file"), "allow");
 });
