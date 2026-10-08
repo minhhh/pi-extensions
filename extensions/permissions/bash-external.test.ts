@@ -34,6 +34,14 @@ function folderFor(abs: string): string {
   return path.dirname(abs);
 }
 
+/**
+ * Spell a native path for a shell command. Git Bash on Windows resolves forward
+ * slashes, while a raw `C:\...` path would be read as escapes and mangled, so
+ * the separator is taken from `path.sep` instead of hardcoded. On POSIX this is
+ * the identity.
+ */
+const shell = (native: string): string => native.split(path.sep).join("/");
+
 /** The folders the gate would ask for, after collapsing nested ones. */
 function externalFolders(command: string, cwd: string): string[] {
   const folders = new Set<string>();
@@ -53,7 +61,7 @@ function externalFolders(command: string, cwd: string): string[] {
 
 test("cd then relative reads asks for the cd tree, not root", () => {
   const command = [
-    `cd ${project} && grep -n "custom" extensions/types.ts`,
+    `cd ${shell(project)} && grep -n "custom" extensions/types.ts`,
     'echo "==="',
     "sed -n '/custom<T>/,/;/p' extensions/types.ts",
   ].join("; ");
@@ -62,6 +70,6 @@ test("cd then relative reads asks for the cd tree, not root", () => {
 
 test("the sed address alone never asks for the filesystem root", () => {
   // `T>/,/` is a redirection candidate only because the scan ignores quotes.
-  const command = `sed -n '/custom<T>/,/;/p' ${project}/extensions/types.ts`;
+  const command = `sed -n '/custom<T>/,/;/p' ${shell(path.join(project, "extensions", "types.ts"))}`;
   assert.deepEqual(externalFolders(command, work), [canonicalize(path.join(project, "extensions"))]);
 });

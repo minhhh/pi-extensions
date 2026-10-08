@@ -247,6 +247,12 @@ being silently skipped:
 - `(subshell)` for `$(...)`, backticks, and `${...}`
 - `(indirect)` for `find -exec` and `xargs`
 
+On Windows a leading `/` is ambiguous: it opens an option for a native program
+(`tasklist /FI`) and marks a root for MSYS (`/c/Users`). The parser treats a
+single-segment `/NAME` as an option and a drive spelling or a multi-segment path
+as a path, so `tasklist /FI "PID eq 1" /FO LIST` asks to run `tasklist` rather
+than asking to touch `C:\FI`.
+
 An `echo $(date)` will therefore ask under the default rules. Add an `allow` for
 `(subshell)` if that gets in the way, and go back to a `deny` when it does not.
 

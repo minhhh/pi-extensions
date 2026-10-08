@@ -12,9 +12,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test, { after } from "node:test";
-import { addExternalFolder, grantsFromEntries } from "./permission-gate.ts";
+import { addExternalFolder, folderPattern, grantsFromEntries } from "./permission-gate.ts";
 import type { PermissionRequest, PermissionRule } from "./types.ts";
-import { canonicalize } from "./wildcard.ts";
+import { canonicalize, pathPatterns } from "./wildcard.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-gate-"));
 const project = path.join(tmp, "project");
@@ -42,6 +42,13 @@ function makeSymlink(target: string, link: string): boolean {
 const dirLink = path.join(project, "root");
 const symlinksAvailable = makeSymlink(outside, dirLink);
 
+test("an external folder pattern ends with the platform separator", () => {
+  // The prompt and the copy-pasted rule must read like a native path. A
+  // literal `/` would render `C:\work\outside/*` on Windows, mixing separators.
+  const folder = path.join(os.homedir(), "project");
+  assert.equal(folderPattern(folder), folder + path.sep + "*");
+});
+
 test("an internal path produces no external request", () => {
   assert.deepEqual(collect(path.join(project, "file.txt"), project), []);
   assert.deepEqual(collect(path.join(project, "nested", "file.txt"), project), []);
@@ -54,7 +61,7 @@ test("an external path asks for the canonical absolute folder", () => {
   assert.equal(requests.length, 1);
   const request = requests[0]!;
   const expected = canonicalize(outside);
-  assert.deepEqual(request.patterns, [expected]);
+  assert.deepEqual(request.patterns, pathPatterns(expected));
   assert.deepEqual(request.always[0]!.patterns, [expected]);
   assert.equal(path.isAbsolute(request.patterns[0]!), true);
   assert.match(request.display, new RegExp(`Access external directory ${expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
@@ -71,7 +78,7 @@ test("a symlinked directory inside the cwd asks for its real target", (t) => {
 
   assert.equal(requests.length, 1);
   const folder = canonicalize(outside);
-  assert.deepEqual(requests[0]!.patterns, [folder]);
+  assert.deepEqual(requests[0]!.patterns, pathPatterns(folder));
   assert.deepEqual(requests[0]!.always[0]!.patterns, [folder]);
   assert.notEqual(requests[0]!.patterns[0], dirLink);
 });
@@ -84,7 +91,7 @@ test("a path that does not exist yet still resolves through a symlinked parent",
   const requests = collect(path.join(dirLink, "not-created-yet.txt"), project);
 
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0]!.patterns, [canonicalize(outside)]);
+  assert.deepEqual(requests[0]!.patterns, pathPatterns(canonicalize(outside)));
 });
 
 function grant(data: unknown): unknown {

@@ -19,7 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { sessionAlways, type AlwaysOption } from "./types.ts";
-import { toNativePath } from "./wildcard.ts";
+import { isDrivePath, toNativePath } from "./wildcard.ts";
 
 const WRAPPERS = new Set([
   "sudo",
@@ -194,14 +194,23 @@ function isFlag(token: string): boolean {
   return token.startsWith("-") && token !== "-";
 }
 
+/**
+ * The program name at the end of a token. `path.basename` splits on the
+ * platform's separators, so `C:\tools\git.exe` names `git.exe` on Windows the
+ * same way `/usr/bin/git` names `git` elsewhere. Splitting on `/` alone leaves
+ * a native Windows path whole, so its wrapper and command family would never
+ * match.
+ */
 function basename(command: string): string {
-  const parts = command.split("/");
-  return parts[parts.length - 1] ?? command;
+  return path.basename(command);
 }
 
 export function resolveUserPath(target: string, cwd: string): string {
   if (target === "~") return os.homedir();
-  if (target.startsWith("~/")) return path.resolve(os.homedir(), toNativePath(target.slice(2)));
+  // Accept the native `~\` spelling on Windows as well as `~/`, which is what
+  // the path tools receive when a caller builds the path natively.
+  const homeRelative = target.startsWith("~/") || (process.platform === "win32" && target.startsWith("~\\"));
+  if (homeRelative) return path.resolve(os.homedir(), toNativePath(target.slice(2)));
   return path.resolve(toNativePath(cwd), toNativePath(target));
 }
 
@@ -538,8 +547,26 @@ function splitFamilies(tokens: string[]): { families: string[]; rest: string[] }
   return { families, rest: tokens.slice(i) };
 }
 
+/**
+ * Windows-native programs write options with a leading `/`, the same character
+ * MSYS/Cygwin uses to mark a root path. A token of the form `/NAME` with no
+ * further separator reads as an option, not a path: resolving it would anchor
+ * it to the cwd drive and invent `C:\NAME` in the prompt. A drive spelling
+ * (`/c/...`) still names a path, and a token with more than one segment
+ * (`/usr/bin`) keeps its path meaning. Shared with `toNativePath` so the drive
+ * pattern is defined once.
+ */
+function looksLikeWindowsFlag(token: string): boolean {
+  return /^\/[A-Za-z][^/\\]*$/.test(token) && !isDrivePath(token);
+}
+
 function looksLikePath(token: string): boolean {
-  return token.includes("/") || token.startsWith(".") || token.startsWith("~");
+  if (token.startsWith(".") || token.startsWith("~")) return true;
+  if (process.platform === "win32" && looksLikeWindowsFlag(token)) return false;
+  // Pick the separator set from the platform instead of assuming `/`: a
+  // backslash is a separator on Windows but a literal filename character
+  // elsewhere, so a token like `src\core` is a path on exactly one of them.
+  return (process.platform === "win32" ? /[\\/]/ : /\//).test(token);
 }
 
 /**

@@ -76,22 +76,30 @@ export function wildcardMatch(value: string, pattern: string): boolean {
   return compile(pattern).test(value.replace(/\\/g, "/"));
 }
 
+/** The separator that may follow a `~` or `$HOME` prefix on this platform. */
+const HOME_SEPARATOR = path.sep === "\\" ? /^[\\/]/ : /^\//;
+
 /**
  * Expand a leading `~` or `$HOME` to the home directory. Only the start of a
- * pattern is expanded, matching OpenCode.
+ * pattern is expanded, matching OpenCode. The remainder is joined with
+ * `path.join`, so the result uses native separators instead of a hardcoded
+ * `/`. On Windows both `/` and `\` open the remainder, so a POSIX-style config
+ * and the `~` spelling `pathPatterns` generates both expand.
  */
 export function expandHome(pattern: string, home = os.homedir()): string {
-  if (pattern === "~") return home;
-  if (pattern.startsWith("~/")) return home + pattern.slice(1);
-  if (pattern.startsWith("$HOME/")) return home + pattern.slice(5);
-  if (pattern.startsWith("$HOME")) return home + pattern.slice(5);
-  return pattern;
+  if (pattern === "~" || pattern === "$HOME") return home;
+  const prefix = pattern.startsWith("$HOME") ? "$HOME" : "~";
+  if (!pattern.startsWith(prefix)) return pattern;
+  const rest = pattern.slice(prefix.length);
+  return HOME_SEPARATOR.test(rest) ? path.join(home, rest.slice(1)) : pattern;
 }
 
 /**
  * Spellings of one resolved path, tried in order. An absolute config pattern
  * hits the absolute form, and `~/...` hits the home form. The `~/...` form is
- * only added when the path sits under the home directory.
+ * only added when the path sits under the home directory, and the separator is
+ * joined natively so a Windows spelling reads `~\AppData\...`, not a mixed
+ * `~/AppData\...`.
  *
  * The canonical (symlink-resolved) form is added too when it differs. A rule is
  * written against the real target, so matching only the lexical name lets
@@ -108,7 +116,7 @@ export function pathPatterns(abs: string, home = os.homedir()): string[] {
     out.push(candidate);
     const homeRel = path.relative(home, candidate);
     if (homeRel && !homeRel.startsWith("..") && !path.isAbsolute(homeRel)) {
-      out.push(`~/${homeRel}`);
+      out.push(path.join("~", homeRel));
     }
   }
   return [...new Set(out)];
@@ -125,9 +133,24 @@ export function pathPatterns(abs: string, home = os.homedir()): string[] {
  * a permission prompt. Every other platform, and every native or relative
  * spelling, passes through unchanged.
  */
+function drivePathMatch(target: string): RegExpExecArray | undefined {
+  return /^\/cygdrive\/([A-Za-z])(?:\/|$)/.exec(target) ?? /^\/([A-Za-z])(?:\/|$)/.exec(target) ?? undefined;
+}
+
+/**
+ * Whether a shell string uses an MSYS/Cygwin drive spelling such as `/c` or
+ * `/cygdrive/c/Users`. This is a shape test, not a platform test, so callers
+ * that only care on Windows gate it themselves. It exists so the analyzer can
+ * tell a drive spelling apart from a `/NAME` command option without repeating
+ * the pattern `toNativePath` uses.
+ */
+export function isDrivePath(target: string): boolean {
+  return drivePathMatch(target) !== undefined;
+}
+
 export function toNativePath(target: string): string {
   if (process.platform !== "win32") return target;
-  const match = /^\/cygdrive\/([A-Za-z])(?:\/|$)/.exec(target) ?? /^\/([A-Za-z])(?:\/|$)/.exec(target);
+  const match = drivePathMatch(target);
   if (!match) return target;
   const rest = target.slice(match[0].length).replace(/\//g, "\\");
   return `${match[1]!.toUpperCase()}:\\${rest}`;

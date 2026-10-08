@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import test, { after } from "node:test";
-import { canonicalize, collapseFolders, expandHome, isExternal, pathPatterns, toNativePath, wildcardMatch } from "./wildcard.ts";
+import { canonicalize, collapseFolders, expandHome, isDrivePath, isExternal, pathPatterns, toNativePath, wildcardMatch } from "./wildcard.ts";
 
 const WINDOWS = process.platform === "win32";
 
@@ -18,6 +18,18 @@ test("toNativePath leaves native and relative spellings alone", () => {
   assert.equal(toNativePath("relative/file"), "relative/file");
   assert.equal(toNativePath("C:\\Users\\alex"), "C:\\Users\\alex");
   if (!WINDOWS) assert.equal(toNativePath("/c/Users/alex"), "/c/Users/alex");
+});
+
+test("isDrivePath recognizes a drive spelling and nothing else", () => {
+  // Shape test, so it holds on every platform: the token is a drive spelling
+  // when a single letter follows the root. This is what keeps a `/c/...` path
+  // from being read as a Windows `/c` option.
+  for (const spelling of ["/c", "/c/Users/alex", "/cygdrive/d", "/cygdrive/d/dev"]) {
+    assert.equal(isDrivePath(spelling), true, spelling);
+  }
+  for (const other of ["/FI", "/FO", "/usr/bin", "/tmp", "/cygdrive", "c/Users", "C:\\Users"]) {
+    assert.equal(isDrivePath(other), false, other);
+  }
 });
 
 test("canonicalize does not pin a drive-style path to the cwd drive", () => {
@@ -66,6 +78,28 @@ test("a folder pattern does not match a sibling with the same prefix", () => {
 test("a slash after a space is a command pattern, not a folder", () => {
   assert.equal(wildcardMatch("ls /tmp", "ls /*"), true);
   assert.equal(wildcardMatch("ls", "ls /*"), false);
+});
+
+test("expandHome joins the remainder with the platform separator", () => {
+  const home = process.platform === "win32" ? "C:\\Users\\u" : "/home/u";
+  assert.equal(expandHome("~/.pi/**", home), path.join(home, ".pi", "**"));
+  assert.equal(expandHome("$HOME/.pi", home), path.join(home, ".pi"));
+  assert.equal(expandHome("~/", home), home);
+  if (process.platform === "win32") {
+    // A native spelling opens the remainder too, which is what pathPatterns
+    // generates on Windows.
+    assert.equal(expandHome("~\\.pi", home), path.join(home, ".pi"));
+  }
+});
+
+test("pathPatterns spells home with the platform separator", () => {
+  const home = path.join(os.tmpdir(), "permissions-home-probe");
+  const file = path.join(home, "project", "secret.txt");
+  const patterns = pathPatterns(file, home);
+  assert.ok(
+    patterns.includes(path.join("~", "project", "secret.txt")),
+    `expected a native ~ spelling among ${JSON.stringify(patterns)}`,
+  );
 });
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-wildcard-"));

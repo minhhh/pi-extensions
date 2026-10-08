@@ -294,8 +294,19 @@ function alwaysLabel(rules: readonly PermissionRule[]): string {
   return `Allow always: ${rules.map((rule) => rulePattern(rule, display)).join(", ")}`;
 }
 
+/**
+ * Render a folder as "this folder and everything under it". The wildcard is
+ * joined with the platform separator, so a Windows grant reads
+ * `C:\work\outside\*` instead of the mixed `C:\work\outside/*`. Matching
+ * normalizes separators, so either spelling matches; this is about what the
+ * prompt shows and what a copy-pasted rule looks like.
+ */
+export function folderPattern(folder: string): string {
+  return path.join(folder, "*");
+}
+
 function rulePattern(rule: PermissionRule, display: PermissionDisplayType): string {
-  if (display === "external") return `${rule.pattern}/*`;
+  if (display === "external") return folderPattern(rule.pattern);
   if (rule.pattern === "*") return `${rule.permission} *`;
   return rule.pattern;
 }
@@ -303,7 +314,7 @@ function rulePattern(rule: PermissionRule, display: PermissionDisplayType): stri
 function patternLine(request: PermissionRequest): string {
   return request.always
     .flatMap((option) => option.patterns)
-    .map((folder) => `- ${folder}/*`)
+    .map((folder) => `- ${folderPattern(folder)}`)
     .join("\n");
 }
 

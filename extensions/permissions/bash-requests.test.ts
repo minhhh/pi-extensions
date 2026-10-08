@@ -21,6 +21,9 @@ import type { Decision, LoadedConfig, PermissionRule } from "./types.ts";
 const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "permissions-bash-read-"));
 after(() => fs.rmSync(cwd, { recursive: true, force: true }));
 
+/** Spell a native path for a shell command without assuming a separator. */
+const shell = (native: string): string => native.split(path.sep).join("/");
+
 function config(userRules: PermissionRule[] = []): LoadedConfig {
   return {
     defaultRules: [...BUILTIN_RULES],
@@ -88,7 +91,7 @@ test("a symlink to .env is denied through the read permission", (t) => {
   }
 
   assert.equal(readDecision("cat env-link"), "deny");
-  assert.equal(readDecision(`cat ${link}`), "deny");
+  assert.equal(readDecision(`cat ${shell(link)}`), "deny");
 });
 
 test("a case variant of .env is denied on a case-insensitive filesystem", (t) => {
