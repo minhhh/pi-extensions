@@ -124,6 +124,19 @@ const SCRIPT_FLAG_WITH_VALUE = new Set([
 /** Script flags that supply the program, so every remaining operand is a file. */
 const PROGRAM_FLAGS = new Set(["-e", "-f", "--regexp", "--expression", "--file"]);
 
+/**
+ * `find` is `[start-point...] [expression]`. The start points are the trees to
+ * walk; from the first `-`/`!`/`(` the rest is a boolean expression whose
+ * values are patterns (`-path ./.git`, `-name '*.ts'`), not files to read.
+ */
+const FIND_START_OPTIONS = new Set(["-H", "-L", "-P"]);
+
+/** `find` predicates whose value names a file the walk stats. */
+const FIND_REFERENCE_PREDICATES = new Set(["-newer", "-anewer", "-cnewer", "-samefile", "-files0-from"]);
+
+/** `-newerXY` takes a file reference unless `Y` is `t`, which spells a time. */
+const FIND_NEWER_XY = /^-newer[aBcm]([aBcmt])$/;
+
 /** Commands whose durable prefix is two words, so `git push *` beats `git *`. */
 const TWO_WORD_COMMANDS = new Set([
   "git",
@@ -689,27 +702,75 @@ function cdTarget(rest: string[], cwd: string): string | undefined {
   return undefined;
 }
 
-function collectPaths(segment: string, family: string, rest: string[], cwd: string): string[] {
-  const paths = new Set<string>();
-  const isScript = SCRIPT_COMMANDS.has(family);
-  const operands = positionalArgs(rest, isScript);
-  // A script command's first positional is its program. Skip it unless a flag
-  // already supplied the program, in which case the positionals are all paths.
-  const programAttached =
-    rest.some((token) => INLINE_PROGRAM_FLAGS.some((flag) => token.startsWith(flag))) ||
-    rest.some((token) => PROGRAM_FLAGS.has(token));
+/**
+ * Path arguments of a `find` invocation. The starting trees come first, then a
+ * predicate expression, so `-path ./.git` and `-name '*.ts'` name patterns and
+ * `-prune`/`-type` carry no path at all. The reference predicates are the one
+ * part of the expression that stats a file, so their value is still resolved.
+ */
+function findPaths(rest: readonly string[], cwd: string): string[] {
+  const paths: string[] = [];
+  let i = 0;
 
-  let candidates: string[];
-  if (PATH_COMMANDS.has(family)) {
-    candidates = operands;
-  } else if (isScript) {
-    // The file operands read regardless of a slash, so a bare `types.ts` counts.
-    candidates = programAttached ? operands : operands.slice(1);
-  } else {
-    candidates = operands.filter(looksLikePath);
+  while (i < rest.length) {
+    const token = rest[i]!;
+    if (token === "-D") {
+      i += 2;
+      continue;
+    }
+    if (FIND_START_OPTIONS.has(token)) {
+      i++;
+      continue;
+    }
+    break;
   }
 
-  for (const candidate of candidates) paths.add(resolveUserPath(candidate, cwd));
+  for (; i < rest.length; i++) {
+    const token = rest[i]!;
+    if (token.startsWith("-") || token === "!" || token === "(" || token === ",") break;
+    paths.push(token);
+  }
+
+  for (; i < rest.length; i++) {
+    const token = rest[i]!;
+    const xy = FIND_NEWER_XY.exec(token);
+    const reference = FIND_REFERENCE_PREDICATES.has(token) || (xy !== null && xy[1] !== "t");
+    if (!reference) continue;
+    const value = rest[i + 1];
+    if (value !== undefined && value !== "-") paths.push(value);
+    i++;
+  }
+
+  return paths.map((path) => resolveUserPath(path, cwd));
+}
+
+function collectPaths(segment: string, family: string, rest: string[], cwd: string): string[] {
+  const paths = new Set<string>();
+
+  if (family === "find") {
+    for (const path of findPaths(rest, cwd)) paths.add(path);
+  } else {
+    const isScript = SCRIPT_COMMANDS.has(family);
+    const operands = positionalArgs(rest, isScript);
+    // A script command's first positional is its program. Skip it unless a flag
+    // already supplied the program, in which case the positionals are all paths.
+    const programAttached =
+      rest.some((token) => INLINE_PROGRAM_FLAGS.some((flag) => token.startsWith(flag))) ||
+      rest.some((token) => PROGRAM_FLAGS.has(token));
+
+    let candidates: string[];
+    if (PATH_COMMANDS.has(family)) {
+      candidates = operands;
+    } else if (isScript) {
+      // The file operands read regardless of a slash, so a bare `types.ts` counts.
+      candidates = programAttached ? operands : operands.slice(1);
+    } else {
+      candidates = operands.filter(looksLikePath);
+    }
+
+    for (const candidate of candidates) paths.add(resolveUserPath(candidate, cwd));
+  }
+
   for (const target of redirectionTargets(segment)) paths.add(resolveUserPath(target, cwd));
 
   return [...paths];

@@ -115,6 +115,31 @@ test("analyzeBash reads a subshell closer before a redirect as grouping", () => 
   );
 });
 
+test("analyzeBash reads a find predicate value as a pattern, not a path", () => {
+  // `-path ./.git` is a pattern to match; `-prune` never descends into it, so
+  // counting it as read made the gate ask for a path the command skips.
+  const command = "find . -path ./.git -prune -o -type f -print";
+  const find = analyzeBash(command, cwd).find((segment) => segment.patterns.includes("find"));
+  assert.ok(find, "expected a find segment");
+  assert.deepEqual(find.paths, [at(".")]);
+});
+
+test("analyzeBash keeps a find reference-file predicate as a path", () => {
+  // `-newer FILE` stats FILE, so it is a real read even though it sits in the
+  // expression. `-newermt` takes a literal time and stays out of the paths.
+  const newer = analyzeBash("find ./src -newer /tmp/stamp -name '*.ts'", cwd).find((segment) =>
+    segment.patterns.includes("find"),
+  );
+  assert.ok(newer, "expected a find segment");
+  assert.deepEqual(newer.paths, [at("src"), at("/tmp/stamp")]);
+
+  const time = analyzeBash('find . -newermt "2 days ago" -type f', cwd).find((segment) =>
+    segment.patterns.includes("find"),
+  );
+  assert.ok(time, "expected a find segment");
+  assert.deepEqual(time.paths, [at(".")]);
+});
+
 test("analyzeBash ignores an input redirect to /dev/null", () => {
   // The null device is not a project file. Counting it makes the gate ask for
   // /dev, which nobody wants to approve.
