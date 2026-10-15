@@ -295,59 +295,69 @@ function shellText(segment: string): string {
   return newline !== -1 && opensHeredoc(segment) ? segment.slice(0, newline) : segment;
 }
 
-/** Count unquoted parentheses, which are the only ones that can group commands. */
-function unquotedParens(text: string): { opens: number[]; closes: number[] } {
-  const opens: number[] = [];
-  const closes: number[] = [];
-  let quote: '"' | "'" | null = null;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]!;
-    if (quote) {
-      if (ch === "\\" && quote === '"') i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      continue;
-    }
-    if (ch === "\\") {
-      i++;
-      continue;
-    }
-    if (ch === "(") opens.push(i);
-    else if (ch === ")") closes.push(i);
-  }
-
-  return { opens, closes };
-}
-
 /**
  * Drop the parentheses that group a command list. A subshell splits at the
  * same operators as the rest of the line, so an opening `(` lands at the start
- * of a segment and its `)` lands at the end of another. Quoted parens stay
- * inside their token, and balanced parens that belong to `$(...)` are left
- * alone so the substitution is still visible to the rules.
+ * of a segment and its `)` lands at the end of another, sometimes followed by
+ * a redirection (`... | sort) > out`). Every unquoted grouping paren is
+ * removed wherever it sits, while the parens of `$(...)` and `$((...))` stay
+ * so a substitution is still visible to the rules. A `$` that begins a
+ * substitution is tracked by depth, so nested `(` inside it is left alone.
  */
 function stripGroupingParens(segment: string): string {
   const trimmed = segment.trim();
   if (!trimmed.includes("(") && !trimmed.includes(")")) return trimmed;
 
-  const { opens, closes } = unquotedParens(trimmed);
-  let lead = 0;
-  while (trimmed[lead] === "(") lead++;
+  let out = "";
+  let quote: '"' | "'" | null = null;
+  let substitution = 0;
 
-  const limit = lead > 0 ? lead : Math.max(0, closes.length - opens.length);
-  const closeSet = new Set(closes);
-  let end = trimmed.length;
-  let removed = 0;
-  while (removed < limit && end > 0 && trimmed[end - 1] === ")" && closeSet.has(end - 1)) {
-    end--;
-    removed++;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i]!;
+
+    if (quote) {
+      out += ch;
+      if (ch === "\\" && quote === '"') {
+        out += trimmed[++i] ?? "";
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+
+    // An escaped paren is a literal, not grouping. Keep the backslash and the
+    // paren together so the marker scan still sees the same text.
+    if (ch === "\\") {
+      out += ch + (trimmed[++i] ?? "");
+      continue;
+    }
+
+    if (ch === "(") {
+      if (substitution > 0 || trimmed[i - 1] === "$") {
+        substitution++;
+        out += ch;
+      }
+      continue;
+    }
+
+    if (ch === ")") {
+      if (substitution > 0) {
+        substitution--;
+        out += ch;
+      }
+      continue;
+    }
+
+    out += ch;
   }
 
-  return trimmed.slice(lead, end);
+  return out;
 }
 
 /** Split a command line into sub-commands at unquoted shell operators. */

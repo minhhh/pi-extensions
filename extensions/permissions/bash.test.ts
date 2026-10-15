@@ -99,6 +99,22 @@ test("analyzeBash reads a subshell as grouping, not as part of the command name"
   assert.deepEqual(head.patterns, ["head -60", "head"]);
 });
 
+test("analyzeBash reads a subshell closer before a redirect as grouping", () => {
+  // The closer is followed by `> /tmp/v1.txt`, not the end of the segment, so
+  // the trailing-only paren strip misses it and the command is named `sort)`.
+  // A `sort *` rule then never matches and the always-grant is `sort) *`.
+  const command = `cd /Users/minh/gitrepos && (cd projects-v1 && find . -path ./.git -prune -o -type f -print | sort) > /tmp/v1.txt && (cd projects && find . -path ./.git -prune -o -type f -print | sort) > /tmp/p0.txt && wc -l /tmp/v1.txt /tmp/p0.txt && echo "=== ONLY IN projects-v1 ===" && comm -23 /tmp/v1.txt /tmp/p0.txt | head -300`;
+  const segments = analyzeBash(command, cwd);
+  const sorts = segments.filter((segment) => segment.display.includes("sort"));
+  assert.deepEqual(
+    sorts.map((segment) => segment.patterns),
+    [
+      ["sort > /tmp/v1.txt", "sort"],
+      ["sort > /tmp/p0.txt", "sort"],
+    ],
+  );
+});
+
 test("analyzeBash ignores an input redirect to /dev/null", () => {
   // The null device is not a project file. Counting it makes the gate ask for
   // /dev, which nobody wants to approve.
