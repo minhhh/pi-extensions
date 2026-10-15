@@ -115,6 +115,37 @@ test("analyzeBash reads a subshell closer before a redirect as grouping", () => 
   );
 });
 
+test("analyzeBash rolls a cd back when its subshell ends", () => {
+  // The inner cd applies inside the subshell, so `cat file` reads
+  // /src/nested/file. After the `)` the base returns to /src, so `cat other`
+  // reads /src/other rather than the nested directory.
+  const command = "cd /src && (cd nested && cat file) && cat other";
+  const cats = analyzeBash(command, cwd).filter((segment) => segment.patterns.includes("cat"));
+  assert.deepEqual(
+    cats.map((segment) => segment.paths),
+    [[at("/src/nested/file")], [at("/src/other")]],
+  );
+});
+
+test("analyzeBash restores each nested subshell's cd in turn", () => {
+  const command = "cd /src && (cd a && (cd b && cat inner) && cat mid) && cat outer";
+  const cats = analyzeBash(command, cwd).filter((segment) => segment.patterns.includes("cat"));
+  assert.deepEqual(
+    cats.map((segment) => segment.paths),
+    [[at("/src/a/b/inner")], [at("/src/a/mid")], [at("/src/outer")]],
+  );
+});
+
+test("analyzeBash drops a cd in a single balanced subshell", () => {
+  // `(cd nested)` is one segment, so the open and close cancel before the next
+  // command. The base stays at the working directory.
+  const cats = analyzeBash("(cd nested) && cat file", cwd).filter((segment) => segment.patterns.includes("cat"));
+  assert.deepEqual(
+    cats.map((segment) => segment.paths),
+    [[at("file")]],
+  );
+});
+
 test("analyzeBash reads a find predicate value as a pattern, not a path", () => {
   // `-path ./.git` is a pattern to match; `-prune` never descends into it, so
   // counting it as read made the gate ask for a path the command skips.

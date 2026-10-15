@@ -11,8 +11,9 @@
  *   - `sh -c '...'`, `eval`, and nested quoting are not expanded
  *   - aliases and shell functions are invisible
  *   - a wrapper with an unusual option-value pair may misattribute a command
- *   - `cd` rebases later segments, but pipes, pushd/popd, and a `cd` inside a
- *     subshell are not modeled, so the base can be wrong after those
+ *   - `cd` rebases later segments, and a `cd` inside a `( ... )` subshell is
+ *     rolled back at its `)`, but a pipeline puts each side in its own subshell
+ *     and `pushd`/`popd` are not modeled, so the base can be wrong after those
  */
 
 import * as os from "node:os";
@@ -308,6 +309,16 @@ function shellText(segment: string): string {
   return newline !== -1 && opensHeredoc(segment) ? segment.slice(0, newline) : segment;
 }
 
+/** Shell text with grouping parens removed, plus the grouping it carried. */
+interface GroupingText {
+  /** The segment with its grouping parens removed. */
+  text: string;
+  /** Subshells this segment enters, from the `(` that open at its start. */
+  leadingOpens: number;
+  /** Subshells this segment leaves, from the `)` that close an earlier one. */
+  trailingCloses: number;
+}
+
 /**
  * Drop the parentheses that group a command list. A subshell splits at the
  * same operators as the rest of the line, so an opening `(` lands at the start
@@ -316,14 +327,23 @@ function shellText(segment: string): string {
  * removed wherever it sits, while the parens of `$(...)` and `$((...))` stay
  * so a substitution is still visible to the rules. A `$` that begins a
  * substitution is tracked by depth, so nested `(` inside it is left alone.
+ *
+ * The closer positions are also reported so `analyzeBash` can roll a `cd`
+ * back when its subshell ends; a `cd` in a subshell must not rebase the rest
+ * of the line.
  */
-function stripGroupingParens(segment: string): string {
+function readGroupingParens(segment: string): GroupingText {
   const trimmed = segment.trim();
-  if (!trimmed.includes("(") && !trimmed.includes(")")) return trimmed;
+  if (!trimmed.includes("(") && !trimmed.includes(")")) {
+    return { text: trimmed, leadingOpens: 0, trailingCloses: 0 };
+  }
 
   let out = "";
   let quote: '"' | "'" | null = null;
   let substitution = 0;
+  let opens = 0;
+  let closes = 0;
+  let leadingOpens = 0;
 
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i]!;
@@ -355,7 +375,11 @@ function stripGroupingParens(segment: string): string {
       if (substitution > 0 || trimmed[i - 1] === "$") {
         substitution++;
         out += ch;
+        continue;
       }
+      opens++;
+      // A grouping `(` before any other text opens a subshell for this segment.
+      if (out.trim() === "") leadingOpens++;
       continue;
     }
 
@@ -363,14 +387,20 @@ function stripGroupingParens(segment: string): string {
       if (substitution > 0) {
         substitution--;
         out += ch;
+        continue;
       }
+      closes++;
       continue;
     }
 
     out += ch;
   }
 
-  return out;
+  // Closers that pair with an opening from an earlier segment, i.e. not matched
+  // by an open after this segment's leading run.
+  const trailingCloses = Math.max(0, closes - Math.max(0, opens - leadingOpens));
+
+  return { text: out, leadingOpens, trailingCloses };
 }
 
 /** Split a command line into sub-commands at unquoted shell operators. */
@@ -802,81 +832,95 @@ export function analyzeBash(command: string, cwd: string): BashSegment[] {
   const segments: BashSegment[] = [];
   // A `cd` changes the base for the rest of the line; shell state is best effort.
   let effectiveCwd = cwd;
+  // A subshell's `cd` is rolled back when its `)` lands, so the base it saved is
+  // kept here until then.
+  const subshellCwd: string[] = [];
 
   for (const segment of splitCommands(command)) {
-    const shell = stripGroupingParens(shellText(segment));
-    const tokens = tokenize(shell);
+    const grouping = readGroupingParens(shellText(segment));
+    const shell = grouping.text;
+    for (let n = 0; n < grouping.leadingOpens; n++) subshellCwd.push(effectiveCwd);
 
-    if (tokens.length === 0) {
-      if (SUBSTITUTION.test(shell)) {
+    try {
+      const tokens = tokenize(shell);
+
+      if (tokens.length === 0) {
+        if (SUBSTITUTION.test(shell)) {
+          segments.push({
+            patterns: [SUBSTITUTION_FAMILY],
+            paths: [],
+            always: [sessionAlways(SUBSTITUTION_FAMILY)],
+            display: `$ ${clip(segment)}`,
+          });
+        }
+        continue;
+      }
+
+      // A shell keyword names no program. `do` prefixes the body command, so
+      // drop it and parse the rest; the others are handled as path-only.
+      let words = tokens;
+      while (words[0] === "do") words = words.slice(1);
+
+      const substitution = SUBSTITUTION.test(shell);
+      const indirect = INDIRECT.test(shell) || words.includes("xargs");
+
+      if (words.length === 0 || NON_COMMAND_HEADS.has(words[0]!)) {
+        const patterns: string[] = [];
+        const approved: string[] = [];
+        if (substitution) {
+          patterns.push(SUBSTITUTION_FAMILY);
+          approved.push(SUBSTITUTION_FAMILY);
+        }
+        if (indirect) {
+          patterns.push(INDIRECT_FAMILY);
+          approved.push(INDIRECT_FAMILY);
+        }
         segments.push({
-          patterns: [SUBSTITUTION_FAMILY],
-          paths: [],
-          always: [sessionAlways(SUBSTITUTION_FAMILY)],
+          patterns,
+          paths: collectPaths(shell, "", words, effectiveCwd),
+          always: approved.length > 0 ? [sessionAlways(...approved)] : [],
           display: `$ ${clip(segment)}`,
         });
+        continue;
       }
-      continue;
-    }
 
-    // A shell keyword names no program. `do` prefixes the body command, so
-    // drop it and parse the rest; the others are handled as path-only.
-    let words = tokens;
-    while (words[0] === "do") words = words.slice(1);
+      const { families, rest } = splitFamilies(words);
+      const primary = families[families.length - 1] ?? "";
 
-    const substitution = SUBSTITUTION.test(shell);
-    const indirect = INDIRECT.test(shell) || words.includes("xargs");
+      const patterns = commandPatterns(words, families, primary, rest);
+      const approved = approvalPatterns(primary, rest);
 
-    if (words.length === 0 || NON_COMMAND_HEADS.has(words[0]!)) {
-      const patterns: string[] = [];
-      const approved: string[] = [];
       if (substitution) {
         patterns.push(SUBSTITUTION_FAMILY);
         approved.push(SUBSTITUTION_FAMILY);
       }
-      if (indirect) {
+      if (INDIRECT.test(shell) || families.includes("xargs")) {
         patterns.push(INDIRECT_FAMILY);
         approved.push(INDIRECT_FAMILY);
       }
+
+      let paths: string[];
+      if (primary === "cd" && !substitution) {
+        const target = cdTarget(rest, effectiveCwd);
+        paths = target ? [target] : [];
+        if (target) effectiveCwd = target;
+      } else {
+        paths = collectPaths(shell, primary, rest, effectiveCwd);
+      }
+
       segments.push({
         patterns,
-        paths: collectPaths(shell, "", words, effectiveCwd),
+        paths,
         always: approved.length > 0 ? [sessionAlways(...approved)] : [],
         display: `$ ${clip(segment)}`,
       });
-      continue;
+    } finally {
+      // Leave any subshell this segment closed, restoring the base it saved.
+      for (let n = 0; n < grouping.trailingCloses; n++) {
+        const saved = subshellCwd.pop();
+        if (saved !== undefined) effectiveCwd = saved;
+      }
     }
-
-    const { families, rest } = splitFamilies(words);
-    const primary = families[families.length - 1] ?? "";
-
-    const patterns = commandPatterns(words, families, primary, rest);
-    const approved = approvalPatterns(primary, rest);
-
-    if (substitution) {
-      patterns.push(SUBSTITUTION_FAMILY);
-      approved.push(SUBSTITUTION_FAMILY);
-    }
-    if (INDIRECT.test(shell) || families.includes("xargs")) {
-      patterns.push(INDIRECT_FAMILY);
-      approved.push(INDIRECT_FAMILY);
-    }
-
-    let paths: string[];
-    if (primary === "cd" && !substitution) {
-      const target = cdTarget(rest, effectiveCwd);
-      paths = target ? [target] : [];
-      if (target) effectiveCwd = target;
-    } else {
-      paths = collectPaths(shell, primary, rest, effectiveCwd);
-    }
-
-    segments.push({
-      patterns,
-      paths,
-      always: approved.length > 0 ? [sessionAlways(...approved)] : [],
-      display: `$ ${clip(segment)}`,
-    });
   }
 
   return segments;
