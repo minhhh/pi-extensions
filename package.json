@@ -12,7 +12,8 @@
   "pi": {
     "extensions": [
       "./extensions/permissions/permission-gate.ts",
-      "./extensions/tps.ts"
+      "./extensions/tps.ts",
+      "./extensions/compact-context.ts"
     ]
   },
   "scripts": {

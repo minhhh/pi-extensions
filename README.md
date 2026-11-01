@@ -14,9 +14,19 @@ extensions/
     package.json          declares permission-gate.ts as the entry point
     permission-gate.ts    event wiring, the ask flow, /permissions
     config.ts             config loading and built-in defaults
-    bash.ts               shell command analysis
+    rules.ts              last-match-wins rule resolution
+    wildcard.ts           pattern matching and ~ expansion
+    bash.ts               shell command analysis into permission requests
+    requests.ts           collapses asks into one prompt per permission
+    grants.ts             session grants, reconstructed from the session branch
+    types.ts              shared types, no runtime dependencies
+    utils.ts              logging helpers, gated by PI_PERMISSIONS_LOG
   tps.ts                  tokens-per-second report after each turn
+  compact-context.ts      compact_context tool, model-triggered compaction
 ```
+
+Each `permissions` module opens with a comment stating what belongs in it and
+what does not. The tests sit next to the modules as `*.test.ts`.
 
 Pi discovers a subdirectory only when it contains `index.ts`, `index.js`, or a
 `package.json` with a `pi.extensions` field. The last option is why the entry
@@ -31,7 +41,12 @@ ln -sfn /path/to/pi-extensions/extensions/permissions \
   ~/.pi/agent/extensions/permissions
 ln -sfn /path/to/pi-extensions/extensions/tps.ts \
   ~/.pi/agent/extensions/tps.ts
+ln -sfn /path/to/pi-extensions/extensions/compact-context.ts \
+  ~/.pi/agent/extensions/compact-context.ts
 ```
+
+After adding a symlink, run `/reload` in the session or start a new one. The
+`compact_context` tool shows up in the tool list once the extension loads.
 
 Or install the package from git:
 
@@ -112,8 +127,8 @@ OpenCode permissions are keyed by tool name. Pi's tool names map onto them:
 | `bash`, `powershell` | `bash` |
 | anything else | the tool name |
 
-For convenience, `find`, `ls`, `write`, and `powershell` are accepted as
-aliases in config and normalized to the keys above.
+For convenience, `find`, `ls`, `write`, `patch`, `apply_patch`, and
+`powershell` are accepted as aliases in config and normalized to the keys above.
 
 The pattern matches the tool's resource:
 
@@ -277,6 +292,26 @@ counts input, output, cache read, cache write, and total tokens as well. The
 report is skipped in a non-interactive run and when the turn produced no output
 tokens. The extension has no config.
 
+## compact-context
+
+`compact-context.ts` gives the model its own way to compact, without waiting for
+you to type `/compact`. It registers one tool:
+
+```text
+compact_context(instructions?: string)
+```
+
+`instructions` is optional and narrows what the summary emphasises. The call
+runs through the same `session.compact()` path as the slash command, so the
+model, the settings, and the summary format are the ones described in the pi
+compaction docs.
+
+One consequence is worth knowing before you use it. `ctx.compact()` aborts the
+current run before it summarizes, so the tool result never reaches the model.
+The turn ends and work continues from the compacted context on the next request.
+The tool reports success and failure through the same notifications a manual
+compaction uses.
+
 ## Development
 
 ```bash
@@ -288,6 +323,9 @@ npm test
 `npm test` runs the unit tests with Node's built-in test runner. Type-checking
 needs the `@earendil-works/pi-coding-agent` types, which are a dev dependency. At
 runtime pi supplies that module itself.
+
+Commit messages are linted by commitlint through a `commit-msg` hook in
+`lefthook.yml`. Run `lefthook install` once per clone to enable it.
 
 ## License
 
